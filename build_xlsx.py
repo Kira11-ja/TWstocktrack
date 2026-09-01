@@ -39,7 +39,11 @@ MILLIONS = ["revenue", "gross_profit", "total_equity", "shares_diluted"]
 
 
 def _read(name, dates=()):
-    df = pd.read_csv(DATA / name)
+    # ★ 台股代號是純數字，不指定 dtype 會被推論成 int64，
+    # 各分頁的型別不一致時 SUMIFS 會對不到。一律當字串。
+    df = pd.read_csv(DATA / name, dtype={"ticker": str})
+    if "ticker" in df.columns:
+        df["ticker"] = df["ticker"].astype(str).str.strip()
     for c in dates:
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce").dt.date
