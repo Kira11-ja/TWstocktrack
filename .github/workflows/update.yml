@@ -1,0 +1,112 @@
+name: update-stock-data
+
+# 台股 13:30 收盤。UTC 06:30 = 台灣 14:30，收盤後一小時跑，
+# 當天的收盤價就進得來（美股版是台灣早上 07:00，時區完全不同）。
+on:
+  schedule:
+    - cron: '30 6 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: '只跑這幾檔（逗號分隔，留空＝全部）'
+        required: false
+      force_full:
+        description: '忽略快取全部重抓（true / false）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stock-data
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Sync
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          ONLY: ${{ inputs.only }}
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          # 注意：`[ -n "$X" ] && cmd` 在 bash -e 底下，條件為假時
+          # 整個步驟會以 1 結束。一律用 if…fi。
+          ARGS=""
+          if [ -n "$ONLY" ]; then ARGS="$ARGS --only $ONLY"; fi
+          if [ "$FORCE_FULL" = "true" ]; then ARGS="$ARGS --force-full"; fi
+          echo "執行：python sync.py $ARGS"
+          python sync.py $ARGS
+
+      # 分類只是錦上添花，掛掉不該讓整趟白跑。classify.py 自己會吞例外回 0，
+      # 這裡再加 continue-on-error 當第二層保險。
+      - name: Classify
+        if: success()
+        continue-on-error: true
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python classify.py
+
+      # 步驟一旦寫了自訂的 if:，就會蓋掉預設的 success()，
+      # 前面失敗它還是會跑。所以每個都要寫 if: success() && …
+      - name: Build web data
+        if: success()
+        run: python export_json.py
+
+      - name: Build Excel
+        if: success()
+        run: python build_xlsx.py
+
+      # openpyxl 只寫公式字串、不寫快取值。桌機 Excel 開檔會自己重算，
+      # 但線上預覽會整片空白。所以在 CI 用 LibreOffice 算過一次再交付。
+      - name: Recalculate formulas
+        if: success()
+        run: |
+          if ! command -v soffice >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends libreoffice-calc
+          fi
+          python recalc_xlsx.py "台股觀察表.xlsx"
+
+      - name: Commit
+        if: success()
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name  "tw-stock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A data/ docs/ tickers.csv "台股觀察表.xlsx"
+          if git diff --staged --quiet; then
+            echo "沒有任何變更，不需要 commit"
+            exit 0
+          fi
+          git commit -m "data: $(date -u +%F)"
+          # 這段期間 main 可能已經前進。直接 push 會被拒，先合併再重推，
+          # 最多三次。data/ docs/ 與 Excel 都是重跑就會一致的產物，
+          # 真的撞在同一行就以本次結果為準。
+          for i in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "推送被拒（第 $i 次），把遠端的變更接上來再試"
+            if ! git pull --no-rebase --no-edit origin "$BRANCH"; then
+              echo "有檔案撞在一起，這幾個產物以本次結果為準"
+              git merge --abort || true
+              git pull --no-rebase --no-edit -X ours origin "$BRANCH"
+            fi
+            sleep 3
+          done
+          echo "::error::連續三次推不上去，請看 Actions 是否有其他流程同時在寫入"
+          exit 1
