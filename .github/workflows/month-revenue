@@ -1,0 +1,72 @@
+name: update-month-revenue
+
+# 台股每月 10 日前公布上月營收，是最高頻的基本面指標，美股完全沒有這一層。
+# 它跟季報的節奏完全不同步，所以獨立一支流程、獨立一張表（data/raw_m.csv）。
+#
+# 為什麼跑三天：10 日是法定期限，但常有公司在最後一天壓線、或隔天補公告。
+# 11、12、13 各跑一次，三次都是增量，重覆跑不會有副作用。
+# UTC 01:00 = 台灣早上 09:00。
+on:
+  schedule:
+    - cron: '0 1 11-13 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 跟季報同一組。兩支流程都會寫 data/ 與 Excel，同時跑會撞在一起。
+# 同一組只准一個在跑、一個在等，第三個會被取消 —— 但這兩支的排程
+# 錯開得夠遠，不會出現三個並存。
+concurrency:
+  group: stock-data
+  cancel-in-progress: false
+
+jobs:
+  month:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Sync month revenue
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python sync.py --month-only
+
+      - name: Build web data
+        if: success()
+        run: python export_json.py
+
+      - name: Commit
+        if: success()
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name  "tw-stock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A data/ docs/
+          if git diff --staged --quiet; then
+            echo "月營收沒有變化，不需要 commit"
+            exit 0
+          fi
+          git commit -m "month-revenue: $(date -u +%F)"
+          for i in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "推送被拒（第 $i 次），把遠端的變更接上來再試"
+            if ! git pull --no-rebase --no-edit origin "$BRANCH"; then
+              git merge --abort || true
+              git pull --no-rebase --no-edit -X ours origin "$BRANCH"
+            fi
+            sleep 3
+          done
+          echo "::error::連續三次推不上去"
+          exit 1
