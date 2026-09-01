@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>台股觀察表</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#fff; --line:#e3e6ea; --line2:#eef0f3;
+  --ink:#1a1d21; --dim:#6b7280; --faint:#9aa1ab;
+  --up:#0a7d3f; --down:#c0272d; --flat:#8a6d00;
+  --accent:#1f3864; --accent-soft:#eaf0fa;
+  --chip:#f0f2f5;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#14161a; --panel:#1b1e24; --line:#2b3038; --line2:#23272e;
+    --ink:#e8eaed; --dim:#9aa1ab; --faint:#6b7280;
+    --up:#4ade80; --down:#f87171; --flat:#fbbf24;
+    --accent:#93b4e8; --accent-soft:#1e2a3d;
+    --chip:#252932;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;}
+header{position:sticky;top:0;z-index:30;background:var(--panel);
+  border-bottom:1px solid var(--line);padding:10px 16px;
+  display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.02em}
+.meta{color:var(--dim);font-size:12px}
+.spacer{flex:1}
+button,select,input{font:inherit;color:inherit;background:var(--panel);
+  border:1px solid var(--line);border-radius:7px;padding:5px 10px}
+button{cursor:pointer}
+button:hover{background:var(--chip)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+@media (prefers-color-scheme:dark){button.primary{color:#0f1216}}
+main{padding:16px;max-width:100%}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  margin-bottom:16px;overflow:hidden}
+.sec-head{padding:10px 14px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sec-head h2{font-size:14px;margin:0;font-weight:700}
+.sec-head .note{color:var(--dim);font-size:12px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line2);text-align:right}
+th{background:var(--panel);color:var(--dim);font-weight:600;font-size:11.5px;
+  position:sticky;top:0;z-index:2;border-bottom:1px solid var(--line)}
+th.grp{text-align:center;color:var(--accent);background:var(--accent-soft);
+  border-bottom:1px solid var(--line);top:0;z-index:3}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--ink)}
+td.l,th.l{text-align:left}
+tbody tr:hover{background:var(--chip)}
+tbody tr.sel{background:var(--accent-soft)}
+/* 總覽有 26 欄，橫向捲動時代號要釘住，不然不知道自己在看哪一檔 */
+#tbl thead tr:nth-child(2) th:first-child{position:sticky;left:0;z-index:4}
+#tbl tbody td:first-child{position:sticky;left:0;z-index:1;
+  background:var(--panel);box-shadow:1px 0 0 var(--line2)}
+#tbl thead tr:nth-child(2) th:first-child{background:var(--panel);box-shadow:1px 0 0 var(--line)}
+#tbl tbody tr:hover td:first-child{background:var(--chip)}
+#tbl tbody tr.sel td:first-child{background:var(--accent-soft)}
+#detail{scroll-margin-top:64px}
+#tbl tfoot td{border-top:2px solid var(--line);border-bottom:none;
+  background:var(--chip);font-weight:600;position:sticky;bottom:0}
+#tbl tfoot td:first-child{position:sticky;left:0;bottom:0;z-index:3;background:var(--chip)}
+.medlabel{font-weight:700;color:var(--dim);font-size:12px}
+.tk{font-weight:700;cursor:pointer}
+.up{color:var(--up)} .down{color:var(--down)} .nm{color:var(--faint)}
+.badge{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11.5px;font-weight:600}
+.b-ga{background:rgba(10,125,63,.14);color:var(--up)}
+.b-gd{background:rgba(138,109,0,.16);color:var(--flat)}
+.b-sc{background:rgba(138,109,0,.16);color:var(--flat)}
+.b-sd{background:rgba(192,39,45,.14);color:var(--down)}
+.tier{font-size:11.5px;color:var(--dim)}
+.tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.tag{font-size:11px;padding:0 6px;border-radius:4px;border:1px solid var(--line);
+  color:var(--dim);background:var(--chip);cursor:pointer;line-height:17px}
+.tag:hover{color:var(--ink);border-color:var(--accent)}
+.tag.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.flags{color:var(--flat);font-size:11.5px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:1px;background:var(--line2)}
+.card{background:var(--panel);padding:10px 14px}
+.card .k{color:var(--dim);font-size:11.5px}
+.card .v{font-size:17px;font-weight:700;margin-top:2px}
+.card .s{color:var(--faint);font-size:11.5px;margin-top:1px}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);
+  color:var(--ink);padding:0;max-width:520px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.dlg-body{padding:16px}
+.dlg-body h3{margin:0 0 4px;font-size:15px}
+.dlg-body p{margin:0 0 14px;color:var(--dim);font-size:12.5px}
+.row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.row label{flex:1 1 auto;min-width:132px;font-size:13px}
+.row .hint{display:block;color:var(--faint);font-size:11.5px;font-weight:400}
+.row input[type=number]{width:120px;text-align:right;flex:none}
+.row select{flex:0 1 200px;min-width:120px}
+.row input[type=text]{flex:1 1 200px;min-width:0;text-align:left}
+.row.wide{display:block}
+.row.wide input[type=text]{width:100%}
+.pick{display:flex;gap:6px;flex:1 1 260px;min-width:0}
+.pick select{flex:1 1 auto}
+.pick input{flex:1 1 auto;min-width:0}
+.frow{display:grid;grid-template-columns:96px 1fr;gap:12px;
+  align-items:start;margin-bottom:12px}
+.frow > label{font-size:13px;padding-top:7px;line-height:1.35}
+.frow > label .hint{display:block;color:var(--faint);font-size:11.5px;
+  font-weight:400;padding-top:2px}
+.frow > .ctl{display:flex;flex-direction:column;gap:6px;min-width:0}
+.frow input,.frow select{width:100%;text-align:left}
+@media(max-width:520px){.frow{grid-template-columns:1fr}.frow > label{padding-top:0}}
+.dlg-foot{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;
+  border-top:1px solid var(--line)}
+.empty{padding:40px 16px;text-align:center;color:var(--dim)}
+.err{padding:16px;color:var(--down)}
+code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:12px}
+@media (max-width:640px){
+  main{padding:10px} th,td{padding:5px 7px;font-size:12px}
+  header{padding:8px 10px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>台股觀察表</h1>
+  <span class="meta" id="asof"></span>
+  <span class="spacer"></span>
+  <input id="q" type="search" placeholder="搜尋代號／公司" style="width:150px">
+  <select id="tier"><option value="">全部等級</option></select>
+  <select id="ind"><option value="">全部產業</option></select>
+  <select id="tag"><option value="">全部標籤</option></select>
+  <button id="btn-add" class="primary">＋ 新增股票</button>
+  <button id="btn-cfg">⚙ 設定</button>
+</header>
+
+<main>
+  <section id="overview">
+    <div class="sec-head">
+      <h2>總覽</h2>
+      <span class="note">點代號看個股細節。點欄位標題可排序。</span>
+      <span class="spacer"></span>
+      <span class="note" id="count"></span>
+    </div>
+    <div class="scroll"><table id="tbl"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+  </section>
+
+  <section id="detail" hidden></section>
+</main>
+
+<dialog id="dlg-cfg">
+  <div class="dlg-body">
+    <h3>設定</h3>
+    <p>只存在你自己的瀏覽器，改完整頁立刻重算，不會動到 GitHub 上的資料。</p>
+    <div class="row"><label>PEG 成長率下限
+      <span class="hint">成長率低於此值時 PEG 顯示 N/M（低成長時 PEG 會失真）</span></label>
+      <input id="c-peg" type="number" step="0.01" min="0" max="1"></div>
+    <div class="row"><label>毛利率平均取樣季數
+      <span class="hint">「5 年平均毛利率」用幾季算</span></label>
+      <input id="c-gm" type="number" step="1" min="4" max="40"></div>
+    <div class="row"><label>分析師家數下限
+      <span class="hint">低於此值會在該檔標記「預估信心不足」</span></label>
+      <input id="c-an" type="number" step="1" min="0" max="60"></div>
+    <div class="row"><label>加速度「持平」區間 (pp)
+      <span class="hint">加速度絕對值小於此值就當持平。0 ＝完全比照 Excel</span></label>
+      <input id="c-fl" type="number" step="0.5" min="0" max="20"></div>
+    <div class="row"><label>季度檢視顯示季數</label>
+      <input id="c-qs" type="number" step="1" min="4" max="24"></div>
+    <div class="row"><label>年度檢視顯示年數</label>
+      <input id="c-ys" type="number" step="1" min="2" max="10"></div>
+    <div class="row"><label>GitHub Repo
+      <span class="hint">新增／移除股票要用，格式 帳號/repo。留空會自動偵測</span></label></div>
+    <div class="row wide"><input id="c-repo" type="text" placeholder="例：kira/stock-tracker"></div>
+  </div>
+  <div class="dlg-foot">
+    <button id="cfg-reset">恢復預設</button>
+    <button id="cfg-close">關閉</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-edit">
+  <div class="dlg-body">
+    <h3>編輯 <span id="e-t"></span></h3>
+    <p>等級、產業、標籤都只是你自己貼的標籤，不影響任何指標計算——只用來篩選和分組。
+       送出後同樣是開一張 Issue，因為不用重抓資料，大約一分鐘就會生效。</p>
+
+    <div class="frow">
+      <label>等級</label>
+      <div class="ctl">
+        <select id="e-tier-sel"></select>
+        <input id="e-tier-txt" type="text" placeholder="自己打一個等級" hidden>
+      </div>
+    </div>
+
+    <div class="frow">
+      <label>產業<span class="hint">同產業才好互相比較。選「自動判斷」就交給 GitHub</span></label>
+      <div class="ctl">
+        <select id="e-ind-sel"></select>
+        <input id="e-ind-txt" type="text" placeholder="自己打一個產業" hidden>
+      </div>
+    </div>
+
+    <div class="frow">
+      <label>標籤<span class="hint">題材，可多貼，最多 6 個</span></label>
+      <div class="ctl">
+        <input id="e-tags" type="text" placeholder="例：CPO、AI、資料中心">
+        <div id="e-tagpool" class="tags"></div>
+      </div>
+    </div>
+
+    <div class="frow">
+      <label>備註</label>
+      <div class="ctl"><input id="e-note" type="text" placeholder="想追蹤的重點"></div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button id="edit-close">取消</button>
+    <button id="edit-go" class="primary">開 Issue 送出</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-add">
+  <div class="dlg-body">
+    <h3>新增股票</h3>
+    <p>送出後會幫你在 GitHub 開一張 Issue，GitHub 收到就會自動把代號寫進
+       <code>tickers.csv</code>、抓齊歷史資料、更新這個網頁。大約 3～6 分鐘。<br>
+       <b>公司名稱和產業會自動判斷</b>，你只要填自己的分類。</p>
+
+    <div class="frow">
+      <label>股票代號</label>
+      <div class="ctl">
+        <input id="a-t" type="text" placeholder="NVDA" style="text-transform:uppercase">
+      </div>
+    </div>
+
+    <div class="frow">
+      <label>等級</label>
+      <div class="ctl">
+        <select id="a-tier-sel"></select>
+        <input id="a-tier-txt" type="text" placeholder="自己打一個等級" hidden>
+      </div>
+    </div>
+
+    <div class="frow">
+      <label>標籤<span class="hint">題材，用頓號或逗號分隔</span></label>
+      <div class="ctl">
+        <input id="a-tags" type="text" placeholder="例：CPO、AI">
+        <div id="a-tagpool" class="tags"></div>
+      </div>
+    </div>
+
+    <div class="frow">
+      <label>備註</label>
+      <div class="ctl"><input id="a-note" type="text" placeholder="想追蹤的重點"></div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button id="add-close">取消</button>
+    <button id="add-go" class="primary">開 Issue 送出</button>
+  </div>
+</dialog>
+
+<script type="module">
+import { DEFAULTS, NM, isNum, indexQuarters, computeSummary, quarterTable, yearTable,
+  SECTORS, TIERS, sectorOf, withCustom } from './metrics.js';
+
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, txt) => { const e = document.createElement(tag);
+  if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
+
+/* ── 設定（存瀏覽器）─────────────────────────────── */
+const CFG_KEY = 'watchlist.cfg.v1';
+let saved = null;
+try {
+  const s = localStorage.getItem(CFG_KEY);
+  if (s) saved = JSON.parse(s);
+} catch (e) { /* 無痕視窗或封鎖儲存 —— 用預設值就好 */ }
+let cfg = { ...DEFAULTS, repo: '', ...(saved || {}) };
+function saveCfg() {
+  saved = { ...cfg };
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
+}
+
+/* ── GitHub repo 自動偵測（帳號.github.io/repo）──── */
+function repoSlug() {
+  if (cfg.repo && cfg.repo.includes('/')) return cfg.repo.trim();
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+  if (!m) return null;
+  const seg = location.pathname.split('/').filter(Boolean);
+  return seg.length ? `${m[1]}/${seg[0]}` : `${m[1]}/${m[1]}.github.io`;
+}
+
+/* ── 格式化 ──────────────────────────────────────── */
+const fmt = {
+  pct(v, d = 1) { return isNum(v) ? (v * 100).toFixed(d) + '%' : txt(v); },
+  num(v, d = 2) { return isNum(v) ? v.toFixed(d) : txt(v); },
+  bps(v) { return isNum(v) ? (v >= 0 ? '+' : '') + v.toFixed(0) : txt(v); },
+  pp(v) { return isNum(v) ? (v >= 0 ? '+' : '') + v.toFixed(2) : txt(v); },
+  money(v) { return isNum(v) ? v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : txt(v); },
+  date(v) { return v ? String(v) : '—'; },
+};
+function txt(v) { return (typeof v === 'string' && v) ? v : '—'; }
+
+function cell(value, kind) {
+  const td = el('td');
+  let s, cls = '';
+  switch (kind) {
+    case 'pct': s = fmt.pct(value); cls = signCls(value); break;
+    case 'pct2': s = fmt.pct(value, 2); cls = signCls(value); break;
+    case 'pctp': s = fmt.pct(value); break;
+    case 'bps': s = fmt.bps(value); cls = signCls(value); break;
+    case 'pp': s = fmt.pp(value); cls = signCls(value); break;
+    case 'x': s = fmt.num(value, 2); break;
+    case 'money': s = fmt.money(value); break;
+    case 'date': s = fmt.date(value); break;
+    default: s = isNum(value) ? fmt.num(value, 2) : txt(value);
+  }
+  if (typeof value === 'string' && (value === NM || value === '不配息')) cls = 'nm';
+  td.textContent = s;
+  if (cls) td.className = cls;
+  return td;
+}
+const signCls = (v) => !isNum(v) ? '' : (v > 0 ? 'up' : v < 0 ? 'down' : '');
+
+const MOM_CLASS = { '成長且加速': 'b-ga', '成長但減速': 'b-gd', '成長持平': 'b-gd',
+  '衰退但收斂': 'b-sc', '衰退持平': 'b-sc', '衰退且惡化': 'b-sd' };
+function momCell(v) {
+  const td = el('td');
+  if (!v) { td.textContent = '—'; return td; }
+  const b = el('span', 'badge ' + (MOM_CLASS[v] || ''), v);
+  td.appendChild(b);
+  return td;
+}
+
+/* ── 總覽表定義 ──────────────────────────────────── */
+const GROUPS = [
+  ['基本', 3], ['估值', 4], ['殖利率', 2], ['成長', 7], ['毛利率', 4], ['ROE', 3], ['預估', 3],
+];
+const COLS = [
+  { k: 't', h: 'Ticker', kind: 'tk', l: true },
+  { k: 'name', h: '公司', kind: 'str', l: true },
+  { k: 'price', h: '股價', kind: 'x' },
+  { k: 'pe_ttm', h: 'PE_TTM', kind: 'x' },
+  { k: 'pe_ntm', h: 'PE Forward', kind: 'x' },
+  { k: 'peg_t', h: 'PEG_T', kind: 'x' },
+  { k: 'peg_f', h: 'PEG_F', kind: 'x' },
+  { k: 'yield', h: '殖利率', kind: 'pct2' },
+  { k: 'dps_yoy', h: '配息YoY', kind: 'pct' },
+  { k: 'rev_qoq', h: '營收QoQ', kind: 'pct' },
+  { k: 'rev_qoq_prev', h: '上季QoQ', kind: 'pct' },
+  { k: 'accel_pp', h: '加速度(pp)', kind: 'pp' },
+  { k: 'momentum', h: '動能判讀', kind: 'mom' },
+  { k: 'yoy_accel_pp', h: '同期加速度(pp)', kind: 'pp' },
+  { k: 'rev_yoy_q', h: '營收YoY', kind: 'pct' },
+  { k: 'eps_yoy_q', h: 'EPS_YoY', kind: 'pct' },
+  { k: 'gm_ttm', h: '毛利率', kind: 'pctp' },
+  { k: 'gm_5y', h: '5年平均', kind: 'pctp' },
+  { k: 'gm_vs_5y_bps', h: 'vs5年(bps)', kind: 'bps' },
+  { k: 'dgm_yoy_bps', h: 'ΔGM_YoY(bps)', kind: 'bps' },
+  { k: 'roe_ttm', h: 'ROE_TTM', kind: 'pctp' },
+  { k: 'roe_5y', h: 'ROE_5年平均', kind: 'pctp' },
+  { k: 'roe_fwd', h: 'ROE Forward', kind: 'pctp' },
+  { k: 'est_eps', h: '當季EPS預估', kind: 'x' },
+  { k: 'est_period', h: '預估期別', kind: 'str' },
+  { k: 'next_earnings', h: '下次財報', kind: 'date' },
+];
+
+let DATA = null, SUM = [], sortKey = 't', sortDir = 1, selected = null;
+
+/* 「選單 + 自己打」的欄位。
+   之前用 <input list=datalist>，但瀏覽器會拿欄位裡既有的字去過濾選項——
+   欄位是「池子」時就只剩「池子」一項，等於看不到別的。改成真的 select，
+   最後多一個「＋ 自己打…」，選了才換成輸入框。 */
+const CUSTOM = '__custom__';
+
+function setupPick(base, groups, used, value, top) {
+  const sel = $('#' + base + '-sel'), txt = $('#' + base + '-txt');
+  sel.innerHTML = '';
+  const listed = new Set();
+  // top＝擺在最前面的特殊選項，例如「自動判斷」。它的 value 是真的會送出去的值。
+  if (top) {
+    const o = el('option', null, top[0]); o.value = top[1];
+    sel.appendChild(o); listed.add(top[1]);
+  }
+  const addOpt = (parent, v) => {
+    if (listed.has(v)) return;
+    listed.add(v);
+    const o = el('option', null, v); o.value = v; parent.appendChild(o);
+  };
+  for (const [label, list] of groups) {
+    if (groups.length === 1 && !label) { for (const v of list) addOpt(sel, v); continue; }
+    const g = el('optgroup'); g.label = label;
+    for (const v of list) addOpt(g, v);
+    sel.appendChild(g);
+  }
+  const extra = [...new Set(used)].filter((v) => v && !listed.has(v)).sort();
+  if (value && !listed.has(value) && !extra.includes(value)) extra.push(value);
+  if (extra.length) {
+    const g = el('optgroup'); g.label = '自訂';
+    for (const v of extra) addOpt(g, v);
+    sel.appendChild(g);
+  }
+  const c = el('option', null, '＋ 自己打…'); c.value = CUSTOM; sel.appendChild(c);
+
+  sel.value = (value && listed.has(value)) ? value : sel.options[0].value;
+  txt.hidden = true; txt.value = '';
+  sel.onchange = () => {
+    txt.hidden = sel.value !== CUSTOM;
+    if (!txt.hidden) { txt.value = ''; txt.focus(); }
+  };
+}
+
+function pickValue(base) {
+  const sel = $('#' + base + '-sel'), txt = $('#' + base + '-txt');
+  return sel.value === CUSTOM ? txt.value.trim() : sel.value;
+}
+
+function fillTierFilter(sel, tickers) {
+  const cur = sel.value;
+  sel.innerHTML = '';
+  const all = el('option', null, '全部等級'); all.value = ''; sel.appendChild(all);
+  const used = tickers.map((t) => t.tier).filter(Boolean);
+  const { extra } = withCustom(TIERS, used);
+  for (const v of [...TIERS, ...extra]) {
+    const n = tickers.filter((t) => t.tier === v).length;
+    if (!n) continue;
+    const o = el('option', null, `${v}（${n}）`); o.value = v; sel.appendChild(o);
+  }
+  sel.value = cur;
+}
+
+function fillIndustryFilter(sel, tickers) {
+  const cur = sel.value;
+  sel.innerHTML = '';
+  const all = el('option', null, '全部產業'); all.value = ''; sel.appendChild(all);
+  const groups = new Map();
+  for (const name of new Set(tickers.map((t) => t.industry).filter(Boolean))) {
+    const sec = sectorOf(name);
+    if (!groups.has(sec)) groups.set(sec, []);
+    groups.get(sec).push(name);
+  }
+  const order = [...SECTORS.map(([x]) => x), '自訂'];
+  for (const sector of order) {
+    const list = groups.get(sector);
+    if (!list) continue;
+    const g = el('optgroup'); g.label = sector;
+    for (const name of list.sort()) {
+      const n = tickers.filter((t) => t.industry === name).length;
+      const o = el('option', null, `${name}（${n}）`); o.value = name; g.appendChild(o);
+    }
+    sel.appendChild(g);
+  }
+  sel.value = cur;
+}
+
+function fillTagFilter(sel, tickers) {
+  const cur = sel.value;
+  sel.innerHTML = '';
+  const all = el('option', null, '全部標籤'); all.value = ''; sel.appendChild(all);
+  const count = new Map();
+  for (const t of tickers) for (const g of (t.tags || [])) count.set(g, (count.get(g) || 0) + 1);
+  for (const [g, n] of [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+    const o = el('option', null, `${g}（${n}）`); o.value = g; sel.appendChild(o);
+  }
+  sel.value = cur;
+}
+
+/* 「點一下加入」的既有標籤列。新增與編輯兩個視窗共用。 */
+function fillTagPool(poolId, inputId) {
+  const pool = $('#' + poolId);
+  pool.innerHTML = '';
+  const known = [...new Set(SUM.flatMap((x) => x.tags || []))].sort();
+  if (!known.length) return;
+  pool.appendChild(el('span', 'hint', '點一下加入：'));
+  pool.appendChild(tagChips(known, (g) => {
+    const cur = $('#' + inputId).value.split(/[、,，;；]+/).map((x) => x.trim()).filter(Boolean);
+    const next = cur.includes(g) ? cur.filter((x) => x !== g) : [...cur, g];
+    $('#' + inputId).value = next.join('、');
+  }));
+}
+
+function tagChips(list, onPick) {
+  const box = el('div', 'tags');
+  for (const g of list) {
+    const c = el('span', 'tag' + ($('#tag').value === g ? ' on' : ''), g);
+    c.onclick = (ev) => { ev.stopPropagation(); onPick(g); };
+    box.appendChild(c);
+  }
+  return box;
+}
+
+function median(xs) {
+  const v = xs.filter(isNum).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+function buildHead() {
+  const thead = $('#tbl thead');
+  thead.innerHTML = '';
+  const r1 = el('tr');
+  for (const [name, span] of GROUPS) {
+    const th = el('th', 'grp', name); th.colSpan = span;
+    r1.appendChild(th);
+  }
+  const r2 = el('tr');
+  for (const c of COLS) {
+    const th = el('th', 'sortable' + (c.l ? ' l' : ''), c.h);
+    th.title = '點一下排序';
+    th.onclick = () => {
+      if (sortKey === c.k) sortDir = -sortDir; else { sortKey = c.k; sortDir = 1; }
+      render();
+    };
+    if (sortKey === c.k) th.textContent = c.h + (sortDir > 0 ? ' ▲' : ' ▼');
+    r2.appendChild(th);
+  }
+  thead.appendChild(r1); thead.appendChild(r2);
+}
+
+function sortVal(row, k) {
+  const v = row[k];
+  if (isNum(v)) return v;
+  if (typeof v === 'string') return v;
+  return null;
+}
+
+function render() {
+  buildHead();
+  const term = $('#q').value.trim().toUpperCase();
+  const tier = $('#tier').value;
+  const ind = $('#ind').value;
+  const tag = $('#tag').value;
+  let rows = SUM.filter((r) =>
+    (!term || r.t.includes(term) || (r.name || '').toUpperCase().includes(term)) &&
+    (!tier || r.tier === tier) &&
+    (!ind || r.industry === ind) &&
+    (!tag || (r.tags || []).includes(tag)));
+
+  rows.sort((a, b) => {
+    const x = sortVal(a, sortKey), y = sortVal(b, sortKey);
+    const xn = isNum(x), yn = isNum(y);
+    if (xn && yn) return (x - y) * sortDir;
+    if (xn) return -1 * sortDir;
+    if (yn) return 1 * sortDir;
+    return String(x ?? '').localeCompare(String(y ?? '')) * sortDir;
+  });
+
+  const tb = $('#tbl tbody');
+  tb.innerHTML = '';
+  for (const r of rows) {
+    const tr = el('tr');
+    if (r.t === selected) tr.className = 'sel';
+    for (const c of COLS) {
+      if (c.kind === 'tk') {
+        const td = el('td', 'l');
+        const a = el('span', 'tk', r.t);
+        a.onclick = () => { selected = r.t; renderDetail(r.t); render();
+          $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+        td.appendChild(a);
+        if (r.flags.length) {
+          const f = el('div', 'flags', '⚑ ' + r.flags.join('、'));
+          td.appendChild(f);
+        }
+        tr.appendChild(td);
+      } else if (c.kind === 'str' && c.k === 'name') {
+        const td = el('td', 'l');
+        td.appendChild(el('div', null, r.name || r.t));
+        td.appendChild(el('div', 'tier', [r.tier, r.industry].filter(Boolean).join('・')));
+        if (r.tags && r.tags.length) {
+          td.appendChild(tagChips(r.tags, (g) => {
+            $('#tag').value = $('#tag').value === g ? '' : g; render();
+          }));
+        }
+        tr.appendChild(td);
+      } else if (c.kind === 'mom') {
+        tr.appendChild(momCell(r[c.k]));
+      } else {
+        tr.appendChild(cell(r[c.k], c.kind));
+      }
+    }
+    tb.appendChild(tr);
+  }
+  renderFooter(rows, [ind, tag].filter(Boolean).join(' · '));
+  const scope = [ind, tag].filter(Boolean).join(' · ');
+  $('#count').textContent = scope
+    ? `${scope}　${rows.length} 檔`
+    : `${rows.length} / ${SUM.length} 檔`;
+}
+
+/* 同業比較用的中位數列。中位數不是平均 —— 一檔 ROE 148% 的 AAPL
+   會把平均整個拉走，中位數不會。 */
+function renderFooter(rows, scope) {
+  const tf = $('#tbl tfoot');
+  tf.innerHTML = '';
+  if (rows.length < 2) return;
+  const tr = el('tr', 'medrow');
+  for (const c of COLS) {
+    if (c.k === 't') {
+      const td = el('td', 'l');
+      td.appendChild(el('div', 'medlabel', '中位數'));
+      td.appendChild(el('div', 'tier', scope ? `${scope} ${rows.length} 檔` : `全部 ${rows.length} 檔`));
+      tr.appendChild(td);
+      continue;
+    }
+    if (['str', 'mom', 'date', 'tk'].includes(c.kind)) { tr.appendChild(el('td')); continue; }
+    tr.appendChild(cell(median(rows.map((r) => r[c.k])), c.kind));
+  }
+  tf.appendChild(tr);
+}
+
+/* ── 個股細節 ────────────────────────────────────── */
+function renderDetail(t) {
+  const sec = $('#detail');
+  sec.hidden = false;
+  sec.innerHTML = '';
+  const s = SUM.find((r) => r.t === t);
+  if (!s) return;
+  const rows = QIDX.get(t) || [];
+
+  const head = el('div', 'sec-head');
+  head.appendChild(el('h2', null, `${t}　${s.name || ''}`));
+  head.appendChild(el('span', 'note',
+    `${s.tier || ''}　EPS 口徑：${s.eps_basis === 'gaap' ? 'GAAP' : 'Adjusted（街頭）'}　`
+    + `資料日期 ${fmt.date(s.as_of)}　下次財報 ${fmt.date(s.next_earnings)}`));
+  if (s.tags && s.tags.length) {
+    head.appendChild(tagChips(s.tags, (g) => {
+      $('#tag').value = g; render();
+      document.querySelector('#overview').scrollIntoView({ behavior: 'smooth' });
+    }));
+  }
+  if (s.note) head.appendChild(el('span', 'note', '「' + s.note + '」'));
+  head.appendChild(el('span', 'spacer'));
+  const ed = el('button', null, '編輯');
+  ed.onclick = () => {
+    $('#e-t').textContent = t;
+    setupPick('e-tier', [['', TIERS]], SUM.map((x) => x.tier), s.tier || '池子');
+    setupPick('e-ind', SECTORS, SUM.map((x) => x.industry), s.industry || '未分類',
+      ['自動判斷（下次更新時由 GitHub 填）', '未分類']);
+    $('#e-tags').value = (s.tags || []).join('、');
+    fillTagPool('e-tagpool', 'e-tags');
+    $('#e-note').value = s.note || '';
+    $('#dlg-edit').dataset.t = t;
+    $('#dlg-edit').showModal();
+  };
+  head.appendChild(ed);
+  const rm = el('button', null, '移除');
+  rm.onclick = () => openIssue(`remove: ${t}`, `請把 ${t} 從 tickers.csv 移除。`);
+  head.appendChild(rm);
+  sec.appendChild(head);
+
+  if (s.n_actual === 0) {
+    const n = el('div', 'empty',
+      `${t} 還沒有任何季度資料。剛新增的股票要等 GitHub 跑完一輪（約 3～6 分鐘）`
+      + '，跑完重整這頁就會出現。');
+    sec.appendChild(n);
+    return;
+  }
+
+  const cards = el('div', 'cards');
+  const card = (k, v, sub) => {
+    const c = el('div', 'card');
+    c.appendChild(el('div', 'k', k));
+    const vv = el('div', 'v', v);
+    c.appendChild(vv);
+    if (sub) c.appendChild(el('div', 's', sub));
+    return c;
+  };
+  cards.appendChild(card('股價', fmt.num(s.price, 2), `分析師 ${isNum(s.n_analysts) ? s.n_analysts : '—'} 家`));
+  cards.appendChild(card('PE_TTM', fmt.num(s.pe_ttm, 2), `EPS_TTM ${fmt.num(s.eps_ttm, 2)}`));
+  cards.appendChild(card('PE Forward', fmt.num(s.pe_ntm, 2), `EPS Fwd ${fmt.num(s.eps_ntm, 2)}`));
+  cards.appendChild(card('PEG_T / PEG_F', `${fmt.num(s.peg_t, 2)} / ${fmt.num(s.peg_f, 2)}`,
+    `EPS成長_F ${fmt.pct(s.eps_growth_f)}`));
+  cards.appendChild(card('殖利率', typeof s.yield === 'string' ? s.yield : fmt.pct(s.yield, 2),
+    `每股配息 TTM ${fmt.num(s.dps_ttm, 2)}`));
+  cards.appendChild(card('營收QoQ', fmt.pct(s.rev_qoq), `加速度 ${fmt.pp(s.accel_pp)} pp・${s.momentum || '—'}`));
+  cards.appendChild(card('毛利率', fmt.pct(s.gm_ttm), `5 年平均 ${fmt.pct(s.gm_5y)}（${fmt.bps(s.gm_vs_5y_bps)} bps）`));
+  cards.appendChild(card('ROE_TTM', typeof s.roe_ttm === 'string' ? s.roe_ttm : fmt.pct(s.roe_ttm),
+    `5 年平均 ${fmt.pct(s.roe_5y)}・每股淨值 ${fmt.num(s.bvps, 2)}`));
+  sec.appendChild(cards);
+
+  const est = DATA.est[t];
+  const yt = yearTable(rows, est, s, cfg);
+
+  sec.appendChild(subTable('年度檢視　·　每一列＝一個完整財年（由季度 rollup）',
+    ['財年', '季數', '營收(百萬元)', '營收YoY', '毛利率', '毛利率變化(bps)', 'EPS(Adj)', 'EPS YoY',
+      'ROE', '每股配息', '年末股價', '殖利率', 'PE', 'PEG_T'],
+    yt.years.map((r) => [
+      [r.fy, 'str', true], [r.n, 'str'], [r.rev, 'money'], [r.rev_yoy, 'pct'],
+      [r.gm, 'pctp'], [r.gm_chg_bps, 'bps'], [r.eps, 'x'], [r.eps_yoy, 'pct'],
+      [r.roe, 'pctp'], [r.dps, 'x'], [r.px, 'x'], [r.yield, 'pct2'],
+      [r.pe, 'x'], [r.peg, 'x'],
+    ]).concat([
+      [[yt.ttm.label, 'str', true], ['', 'str'], [yt.ttm.rev, 'money'], [yt.ttm.rev_yoy, 'pct'],
+        [yt.ttm.gm, 'pctp'], [yt.ttm.gm_chg_bps, 'bps'], [yt.ttm.eps, 'x'], [yt.ttm.eps_yoy, 'pct'],
+        [yt.ttm.roe, 'pctp'], [yt.ttm.dps, 'x'], [yt.ttm.px, 'x'], [yt.ttm.yield, 'pct2'],
+        [yt.ttm.pe, 'x'], [yt.ttm.peg, 'x']],
+      [[yt.fwd.label, 'str', true], ['', 'str'], ['', 'str'], ['', 'str'], ['', 'str'], ['', 'str'],
+        [yt.fwd.eps, 'x'], [yt.fwd.eps_yoy, 'pct'], [yt.fwd.roe, 'pctp'], ['', 'str'], ['', 'str'],
+        ['', 'str'], [yt.fwd.pe, 'x'], [yt.fwd.peg, 'x']],
+    ]),
+    'TTM 那列的「毛利率變化」欄是「最新毛利率 − 5 年平均」，不是年對年。'));
+
+  const qt = quarterTable(rows, cfg);
+  sec.appendChild(subTable('季度檢視　·　加速度只做在這一層',
+    ['期別', '期末日', '營收(百萬元)', '營收QoQ', '上一季QoQ', '加速度(pp)', '動能判讀',
+      '同期加速度(pp)', '營收YoY', '毛利率', 'ΔGM_YoY(bps)', 'EPS(Adj)', 'EPS YoY', '每股配息', '狀態'],
+    qt.map((r) => [
+      [r.period, 'str', true], [r.end, 'date'], [r.rev, 'money'], [r.qoq, 'pct'],
+      [r.prev_qoq, 'pct'], [r.accel_pp, 'pp'], [r.momentum, 'mom'], [r.yoy_accel_pp, 'pp'],
+      [r.rev_yoy, 'pct'], [r.gm, 'pctp'], [r.dgm_yoy_bps, 'bps'], [r.eps, 'x'],
+      [r.eps_yoy, 'pct'], [r.dps, 'x'], [r.status, 'str'],
+    ]),
+    '加速度＝本季QoQ − 上季QoQ。同期加速度＝本季QoQ − 去年同季QoQ（不受淡旺季干擾）。'));
+}
+
+function subTable(title, headers, rows, note) {
+  const wrap = el('div');
+  const h = el('div', 'sec-head');
+  h.style.borderTop = '1px solid var(--line)';
+  h.appendChild(el('h2', null, title));
+  if (note) h.appendChild(el('span', 'note', note));
+  wrap.appendChild(h);
+  const sc = el('div', 'scroll');
+  const tb = el('table');
+  const thead = el('thead'), tr = el('tr');
+  headers.forEach((x, i) => { const th = el('th', i === 0 ? 'l' : '', x); tr.appendChild(th); });
+  thead.appendChild(tr); tb.appendChild(thead);
+  const body = el('tbody');
+  for (const r of rows) {
+    const t = el('tr');
+    for (const [v, kind, left] of r) {
+      if (kind === 'mom') { t.appendChild(momCell(v)); continue; }
+      const td = kind === 'str' ? el('td', left ? 'l' : '', v === null || v === undefined || v === '' ? (left ? '' : '—') : String(v))
+        : cell(v, kind);
+      if (left) td.className = 'l';
+      t.appendChild(td);
+    }
+    body.appendChild(t);
+  }
+  tb.appendChild(body); sc.appendChild(tb); wrap.appendChild(sc);
+  return wrap;
+}
+
+/* ── 開 Issue（新增／移除）───────────────────────── */
+function openIssue(title, body) {
+  const slug = repoSlug();
+  if (!slug) {
+    alert('偵測不到 GitHub repo。請到「⚙ 設定」把 Repo 填成「帳號/repo」。');
+    return;
+  }
+  const url = `https://github.com/${slug}/issues/new?title=${encodeURIComponent(title)}`
+    + `&body=${encodeURIComponent(body)}`;
+  window.open(url, '_blank', 'noopener');
+}
+
+/* ── 事件 ────────────────────────────────────────── */
+$('#q').oninput = render;
+$('#tier').onchange = render;
+$('#ind').onchange = render;
+$('#tag').onchange = render;
+
+$('#btn-cfg').onclick = () => {
+  $('#c-peg').value = cfg.peg_min_growth;
+  $('#c-gm').value = cfg.gm_avg_quarters;
+  $('#c-an').value = cfg.min_analysts;
+  $('#c-fl').value = cfg.accel_flat_pp;
+  $('#c-qs').value = cfg.quarters_shown;
+  $('#c-ys').value = cfg.years_shown;
+  $('#c-repo').value = cfg.repo || '';
+  $('#dlg-cfg').showModal();
+};
+const CFG_FIELDS = [['#c-peg', 'peg_min_growth', parseFloat], ['#c-gm', 'gm_avg_quarters', parseInt],
+  ['#c-an', 'min_analysts', parseInt], ['#c-fl', 'accel_flat_pp', parseFloat],
+  ['#c-qs', 'quarters_shown', parseInt], ['#c-ys', 'years_shown', parseInt]];
+for (const [sel, key, parse] of CFG_FIELDS) {
+  $(sel).oninput = () => {
+    const v = parse($(sel).value);
+    if (!isFinite(v)) return;
+    cfg[key] = v; saveCfg(); recompute();
+  };
+}
+$('#c-repo').oninput = () => { cfg.repo = $('#c-repo').value.trim(); saveCfg(); };
+$('#cfg-close').onclick = () => $('#dlg-cfg').close();
+$('#cfg-reset').onclick = () => {
+  cfg = { ...DEFAULTS, repo: cfg.repo }; saveCfg(); $('#btn-cfg').onclick(); recompute();
+};
+
+$('#edit-close').onclick = () => $('#dlg-edit').close();
+$('#edit-go').onclick = () => {
+  const t = $('#dlg-edit').dataset.t;
+  const body = [`tier: ${pickValue('e-tier')}`, `industry: ${pickValue('e-ind')}`,
+    `tags: ${$('#e-tags').value.trim()}`, `note: ${$('#e-note').value.trim()}`,
+    '', '（這張 Issue 由觀察表網頁自動產生，GitHub 處理完會自己關閉。）'].join('\n');
+  openIssue(`edit: ${t}`, body);
+  $('#dlg-edit').close();
+};
+
+$('#btn-add').onclick = () => {
+  $('#a-t').value = ''; $('#a-note').value = ''; $('#a-tags').value = '';
+  setupPick('a-tier', [['', TIERS]], SUM.map((x) => x.tier), '池子');
+  fillTagPool('a-tagpool', 'a-tags');
+  $('#dlg-add').showModal();
+};
+$('#add-close').onclick = () => $('#dlg-add').close();
+$('#add-go').onclick = () => {
+  const t = $('#a-t').value.trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t)) { alert('代號看起來不像台股代號，請確認。'); return; }
+  // 不送 industry / name —— 留白讓 classify.py 自己判斷
+  const body = [`ticker: ${t}`, `tier: ${pickValue('a-tier')}`,
+    `tags: ${$('#a-tags').value.trim()}`, `note: ${$('#a-note').value.trim()}`,
+    '', '（這張 Issue 由觀察表網頁自動產生，GitHub 處理完會自己關閉。）'].join('\n');
+  openIssue(`add: ${t}`, body);
+  $('#dlg-add').close();
+};
+
+/* ── 載入與計算 ──────────────────────────────────── */
+let QIDX = new Map();
+
+function recompute() {
+  const today = Date.now();
+  SUM = DATA.tickers.map((tk) => {
+    const rows = QIDX.get(tk.t) || [];
+    const s = computeSummary(tk.t, rows, DATA.est[tk.t], DATA.price[tk.t], cfg, today);
+    s.name = tk.name; s.tier = tk.tier; s.industry = tk.industry;
+    s.note = tk.note; s.tags = tk.tags || [];
+    return s;
+  });
+  render();
+  if (selected) renderDetail(selected);
+}
+
+async function boot() {
+  try {
+    const res = await fetch('./data.json?v=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    DATA = await res.json();
+  } catch (e) {
+    document.querySelector('main').innerHTML =
+      `<section><div class="err">讀不到 data.json（${e.message}）。<br>`
+      + `如果這是剛開好的 GitHub Pages，等 GitHub 跑完一次 update-stock-data 再重整。</div></section>`;
+    return;
+  }
+  // 沒改過設定時，用 GitHub 上 config 的值；改過就以你自己存的為準
+  cfg = { ...DEFAULTS, ...(DATA.defaults || {}), repo: cfg.repo, ...(saved || {}) };
+  QIDX = indexQuarters(DATA.quarters);
+  $('#asof').textContent = `資料日期 ${DATA.generated || '—'}`;
+  fillTierFilter($('#tier'), DATA.tickers);
+  fillIndustryFilter($('#ind'), DATA.tickers);
+  fillTagFilter($('#tag'), DATA.tickers);
+  recompute();
+}
+boot();
+</script>
+</body>
+</html>

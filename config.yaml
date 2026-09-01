@@ -1,0 +1,19 @@
+# 抓取行為的參數。改這裡不用動程式。
+target_quarters: 24        # 每檔要維持的實際季數（五年 ROE 需要 21 個季末權益，取 24 留餘裕）
+                           # 實測 FinMind 對 2330 / 2408 / 5289 都有 30 季，餘裕充足
+estimate_quarters: 1       # 往前放幾季預估（目前只放當季）
+report_lag_days: 3         # 法定期限過幾天才去抓（台股常在期限前幾天集中公布，給一點緩衝）
+restatement_window: 8      # 最近幾季允許被覆寫；更舊的鎖定不再重抓
+price_history_years: 7     # 季末股價要回溯幾年
+month_revenue_months: 36   # 月營收要保留幾個月（三年足夠看出年增率的趨勢）
+sources:                   # 瀑布順序，可以增刪
+  - fm                     # FinMind：Raw 層的主力，一家補滿財報 / 資產負債表 / 月營收 / 股利 / 股價
+  - yf                     # yfinance .TW / .TWO：補 FinMind 的缺口，並提供 forwardEps
+  - yq                     # yahooquery：只為了分析師共識（台股覆蓋率低，抓不到是常態）
+
+# 呈現層的門檻。export_json.py 會把這幾個原封輸出到 docs/data.json 的 defaults，
+# 網頁上可以再即時調整。美股版沒有寫進 config，靠程式的預設值 —— 這裡寫明。
+gm_avg_quarters: 20        # 毛利率長期平均取幾季（五年）
+peg_min_growth: 0.05       # PEG 的成長率下限，低於就顯示 N/M（低成長時 PEG 會失真）
+min_analysts: 5            # 共識預估至少要幾位分析師才採用（台股常常不足，會顯示 N/M）
+ntm_days: 365              # 未來十二個月的定義
