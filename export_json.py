@@ -49,7 +49,13 @@ def read(name, dates=()):
     p = DATA / name
     if not p.exists():
         return pd.DataFrame()
-    df = pd.read_csv(p)
+    # ★ 台股特有 ★ 代號是純數字，pandas 會推論成 int64，
+    # 於是 quarters 的 t 是數字 2330、tickers 的 t 是字串 "2330"，
+    # 網頁比對兩者時永遠對不起來 → 每一檔都顯示「資料尚未抓取」。
+    # 美股代號是字母所以踩不到，台股一定要指定 dtype。
+    df = pd.read_csv(p, dtype={"ticker": str})
+    if "ticker" in df.columns:
+        df["ticker"] = df["ticker"].astype(str).str.strip()
     for c in dates:
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce")
