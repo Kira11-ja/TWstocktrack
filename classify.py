@@ -93,6 +93,33 @@ def from_finmind():
     return out
 
 
+def finmind_one(sid):
+    """單檔查詢 —— 全市場總表抓不到某檔時的補位。
+
+    免費層對部分 dataset 會要求一定要帶 data_id（不帶就回 400），
+    所以總表可能整個回空。逐檔查最多就是幾次呼叫，成本很低。
+    """
+    headers = {}
+    token = os.getenv("FINMIND_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        r = requests.get(FINMIND, headers=headers,
+                         params={"dataset": "TaiwanStockInfo", "data_id": sid},
+                         timeout=20)
+        if r.status_code != 200:
+            return None
+        rows = r.json().get("data", [])
+    except Exception:
+        return None
+    for x in rows:
+        name = str(x.get("stock_name", "") or "").strip()
+        ind = str(x.get("industry_category", "") or "").strip()
+        if name or ind:
+            return name, ind
+    return None
+
+
 def from_twse():
     """證交所 OpenAPI 的公司基本資料（上市）。FinMind 抓不到時的備援。
 
@@ -131,14 +158,25 @@ def main():
 
     df = as_text(pd.read_csv(TICKERS, dtype=str))
     lookup = from_finmind()
-    src = "FinMind"
+    src = "FinMind 總表"
     if not lookup:
         lookup = from_twse()
         src = "證交所 OpenAPI"
+    if lookup:
+        print(f"✓ 產業別來源：{src}（{len(lookup)} 檔）")
+    else:
+        print("⚠ 總表抓不到，改成逐檔查 FinMind")
+
+    # 總表沒有的（上櫃、或總表整個回空）逐檔補
+    for sid in df["ticker"].astype(str).str.strip():
+        if sid and sid not in lookup:
+            hit = finmind_one(sid)
+            if hit:
+                lookup[sid] = hit
+            time.sleep(0.3)
     if not lookup:
-        print("⚠ 兩個來源都抓不到公司基本資料，略過分類（不影響同步）")
+        print("⚠ 完全抓不到公司基本資料，略過分類（不影響同步）")
         return 0
-    print(f"✓ 產業別來源：{src}（{len(lookup)} 檔）")
 
     n_name = n_sector = 0
     unknown = []
@@ -163,6 +201,14 @@ def main():
             df.at[i, "tier"] = "池子"
 
     df.to_csv(TICKERS, index=False)
+    # ★ 一定要同時更新 data/tickers.csv ★
+    # workflow 的順序是 sync → classify → export_json。sync 在結束時已經把
+    # 「還沒分類的」根目錄 tickers.csv 複製到 data/ 了，而 export_json.py 與
+    # build_xlsx.py 讀的是 data/ 那一份。只寫根目錄的話，剛補好的公司名稱與
+    # 產業別要等到下一輪同步才會出現在網頁上 —— 看起來就像 classify 沒生效。
+    data_copy = ROOT / "data" / "tickers.csv"
+    if data_copy.parent.exists():
+        df.to_csv(data_copy, index=False)
     print(f"✓ 補上公司名稱 {n_name} 筆、產業別 {n_sector} 筆")
     if unknown:
         print(f"⚠ 查無基本資料（留未分類，可自行填）：{'、'.join(unknown[:20])}")
