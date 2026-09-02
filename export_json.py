@@ -96,6 +96,22 @@ def main():
             "seq": as_int(r.get("seq")),
         })
 
+    # ── 月營收（台股獨有，美股完全沒有這一層）──────────────
+    # 只輸出原始的當月營收；月增率／年增率／累計年增率全部丟給 metrics.js 現算，
+    # 跟季度表同一個原則 —— 網頁上改設定就立刻跟著變，不用等 GitHub 重跑。
+    mo = read("raw_m.csv", dates=["month_end"])
+    if "revenue" in mo.columns:
+        mo["revenue"] = pd.to_numeric(mo["revenue"], errors="coerce") / 1e6
+    months = []
+    for r in mo.to_dict("records"):
+        months.append({
+            "t": clean(r.get("ticker")),
+            "ym": clean(r.get("ym")),
+            "end": clean(r.get("month_end")),
+            "rev": clean(r.get("revenue")),
+            "mseq": as_int(r.get("mseq")),
+        })
+
     est_map = {}
     for r in est.to_dict("records"):
         t = clean(r.get("ticker"))
@@ -153,6 +169,7 @@ def main():
         },
         "tickers": tickers,
         "quarters": quarters,
+        "months": months,
         "est": est_map,
         "price": px_map,
     }
@@ -161,7 +178,8 @@ def main():
     (DOCS / "data.json").write_text(
         json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     kb = (DOCS / "data.json").stat().st_size / 1024
-    print(f"✓ docs/data.json：{len(tickers)} 檔 / {len(quarters)} 季 / {kb:.0f} KB")
+    print(f"✓ docs/data.json：{len(tickers)} 檔 / {len(quarters)} 季 / "
+          f"{len(months)} 個月 / {kb:.0f} KB")
     return 0
 
 
