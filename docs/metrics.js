@@ -2,6 +2,7 @@
    刻意連 N/M 的判斷條件都一模一樣，兩邊數字才會對得起來。 */
 
 export const DEFAULTS = {
+  months_shown: 18,        // 月營收顯示幾個月（要 >= 13 才看得到完整的年增率）
   peg_min_growth: 0.05,   // 成長率低於此值時 PEG 顯示 N/M（低成長時 PEG 會失真）
   gm_avg_quarters: 20,    // 「5 年平均毛利率」的取樣季數
   min_analysts: 5,        // 分析師家數低於此值 → 預估信心不足，出旗標
@@ -162,8 +163,13 @@ export function computeSummary(t, rows, est, price, cfg, todayMs) {
 
   o.bvps = div(at('eq', 1), at('sh', 1));
 
-  /* 淨利用 EPS×股數反推 —— 與 Excel 同口徑（Adjusted），
-     這樣 ROE 的分子才跟 EPS_TTM 是同一套帳。 */
+  /* 淨利用 EPS×股數反推 —— 與 Excel 同口徑，
+     這樣 ROE 的分子才跟 EPS_TTM 是同一套帳。
+
+     台股其實有現成的「淨利歸屬母公司」（Raw 層的 ni 欄），而且實測與
+     EPS×股數 完全吻合（台積電 2026Q2：7,065.6 億 ÷ 259.32 億股 = 27.25 = EPS）。
+     所以這裡沿用反推是安全的；改成直接讀 ni 會更穩，屬於之後的優化。
+     美股當初必須反推，是因為街頭 EPS 與 GAAP 淨利不是同一套帳，台股沒這問題。 */
   const niWindow = (a, b) => {
     let s = 0;
     for (const r of rows) {
@@ -190,7 +196,8 @@ export function computeSummary(t, rows, est, price, cfg, todayMs) {
 
   o.flags = [];
   if (isNum(o.n_analysts) && o.n_analysts < cfg.min_analysts) o.flags.push('分析師僅 ' + o.n_analysts + ' 家');
-  if (o.eps_basis === 'gaap') o.flags.push('EPS 為 GAAP 口徑');
+  // 台股只有一套 EPS 口徑（財報上的基本每股盈餘），沒有街頭 vs GAAP 的分歧，
+  // 所以不需要美股那個「EPS 降級」的旗標。
   o.n_actual = rows.filter((r) => !r.est).length;
   if (o.n_actual === 0) o.flags = ['資料尚未抓取（等 GitHub 跑完這一輪）'];
   else if (o.n_actual < 8) o.flags.push('僅 ' + o.n_actual + ' 季歷史');
@@ -198,6 +205,64 @@ export function computeSummary(t, rows, est, price, cfg, todayMs) {
 }
 
 /* ── 季度檢視 ──────────────────────────────────────────── */
+/* ── 月營收（台股獨有）─────────────────────────────────
+   台股每月 10 日前公布上月營收，是最高頻的基本面指標，
+   比季報早兩三個月透露轉折。
+
+   三個衍生指標的定義：
+     · 月增率   本月 ÷ 上月 −1。台股淡旺季明顯，單看月增率容易被季節性騙。
+     · 年增率   本月 ÷ 去年同月 −1。排除季節性，這是主要看的那個。
+     · 累計年增率  今年 1 月到本月的累計 ÷ 去年同期累計 −1。
+                  平滑掉單月的出貨遞延（例如 3 月的貨壓到 4 月出），
+                  是判斷「趨勢」而非「單月雜訊」用的。
+
+   累計只在「今年到本月」與「去年同期」兩段都完整時才算 —— 缺一個月就寧可留空，
+   不然分母少一個月會讓累計年增率無聲地虛高。 */
+export function indexMonths(months) {
+  const by = new Map();
+  for (const r of months || []) {
+    if (!by.has(r.t)) by.set(r.t, []);
+    by.get(r.t).push(r);
+  }
+  for (const rows of by.values()) rows.sort((a, b) => (a.mseq ?? 9999) - (b.mseq ?? 9999));
+  return by;
+}
+
+export function monthTable(rows, cfg) {
+  if (!rows || !rows.length) return [];
+  const rev = new Map();
+  for (const r of rows) if (isNum(r.rev)) rev.set(r.ym, r.rev);
+  const ym = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
+
+  const out = [];
+  const n = cfg.months_shown ?? 18;
+  for (const r of rows.slice(0, n)) {
+    const parts = String(r.ym || '').split('-');
+    const y = Number(parts[0]), m = Number(parts[1]);
+    if (!y || !m) continue;
+
+    const prevYm = m === 1 ? ym(y - 1, 12) : ym(y, m - 1);
+
+    let cum = 0, cumPrev = 0, full = true, fullPrev = true;
+    for (let i = 1; i <= m; i++) {
+      const a = rev.get(ym(y, i));
+      const b = rev.get(ym(y - 1, i));
+      if (isNum(a)) cum += a; else full = false;
+      if (isNum(b)) cumPrev += b; else fullPrev = false;
+    }
+
+    out.push({
+      ym: r.ym,
+      rev: r.rev,
+      mom: growth(r.rev, rev.get(prevYm)),
+      yoy: growth(r.rev, rev.get(ym(y - 1, m))),
+      cum: full ? cum : null,
+      cum_yoy: (full && fullPrev) ? growth(cum, cumPrev) : null,
+    });
+  }
+  return out;
+}
+
 export function quarterTable(rows, cfg) {
   const at = (f, s) => sumRange(rows, f, s, s);
   const out = [];
