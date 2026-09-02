@@ -265,7 +265,7 @@ code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:12px}
 
 <script type="module">
 import { DEFAULTS, NM, isNum, indexQuarters, computeSummary, quarterTable, yearTable,
-  SECTORS, TIERS, sectorOf, withCustom } from './metrics.js';
+  indexMonths, monthTable, SECTORS, TIERS, sectorOf, withCustom } from './metrics.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, txt) => { const e = document.createElement(tag);
@@ -530,7 +530,7 @@ function sortVal(row, k) {
 
 function render() {
   buildHead();
-  const term = $('#q').value.trim().toUpperCase();
+  const term = $('#q').value.trim().toUpperCase();   // 公司名是中文，toUpperCase 不影響
   const tier = $('#tier').value;
   const ind = $('#ind').value;
   const tag = $('#tag').value;
@@ -624,7 +624,7 @@ function renderDetail(t) {
   const head = el('div', 'sec-head');
   head.appendChild(el('h2', null, `${t}　${s.name || ''}`));
   head.appendChild(el('span', 'note',
-    `${s.tier || ''}　EPS 口徑：${s.eps_basis === 'gaap' ? 'GAAP' : 'Adjusted（街頭）'}　`
+    `${s.tier || ''}　EPS 口徑：${s.eps_basis === 'basic' ? '基本每股盈餘' : (s.eps_basis || '—')}　`
     + `資料日期 ${fmt.date(s.as_of)}　下次財報 ${fmt.date(s.next_earnings)}`));
   if (s.tags && s.tags.length) {
     head.appendChild(tagChips(s.tags, (g) => {
@@ -680,13 +680,22 @@ function renderDetail(t) {
   cards.appendChild(card('毛利率', fmt.pct(s.gm_ttm), `5 年平均 ${fmt.pct(s.gm_5y)}（${fmt.bps(s.gm_vs_5y_bps)} bps）`));
   cards.appendChild(card('ROE_TTM', typeof s.roe_ttm === 'string' ? s.roe_ttm : fmt.pct(s.roe_ttm),
     `5 年平均 ${fmt.pct(s.roe_5y)}・每股淨值 ${fmt.num(s.bvps, 2)}`));
+  // 最新月營收放進卡片區 —— 這是台股最快反映轉折的數字，
+  // 埋在下面的表格裡等於白抓。年增率排除淡旺季，所以卡片上放它而不是月增率。
+  const mrows = MIDX.get(t) || [];
+  const m0 = monthTable(mrows, cfg)[0];
+  if (m0) {
+    cards.appendChild(card('月營收　' + m0.ym, fmt.money(m0.rev),
+      `年增 ${fmt.pct(m0.yoy)}・月增 ${fmt.pct(m0.mom)}`
+      + (m0.cum_yoy == null ? '' : `・累計年增 ${fmt.pct(m0.cum_yoy)}`)));
+  }
   sec.appendChild(cards);
 
   const est = DATA.est[t];
   const yt = yearTable(rows, est, s, cfg);
 
   sec.appendChild(subTable('年度檢視　·　每一列＝一個完整財年（由季度 rollup）',
-    ['財年', '季數', '營收(百萬元)', '營收YoY', '毛利率', '毛利率變化(bps)', 'EPS(Adj)', 'EPS YoY',
+    ['財年', '季數', '營收(百萬元)', '營收YoY', '毛利率', '毛利率變化(bps)', 'EPS', 'EPS YoY',
       'ROE', '每股配息', '年末股價', '殖利率', 'PE', 'PEG_T'],
     yt.years.map((r) => [
       [r.fy, 'str', true], [r.n, 'str'], [r.rev, 'money'], [r.rev_yoy, 'pct'],
@@ -707,7 +716,7 @@ function renderDetail(t) {
   const qt = quarterTable(rows, cfg);
   sec.appendChild(subTable('季度檢視　·　加速度只做在這一層',
     ['期別', '期末日', '營收(百萬元)', '營收QoQ', '上一季QoQ', '加速度(pp)', '動能判讀',
-      '同期加速度(pp)', '營收YoY', '毛利率', 'ΔGM_YoY(bps)', 'EPS(Adj)', 'EPS YoY', '每股配息', '狀態'],
+      '同期加速度(pp)', '營收YoY', '毛利率', 'ΔGM_YoY(bps)', 'EPS', 'EPS YoY', '每股配息', '狀態'],
     qt.map((r) => [
       [r.period, 'str', true], [r.end, 'date'], [r.rev, 'money'], [r.qoq, 'pct'],
       [r.prev_qoq, 'pct'], [r.accel_pp, 'pp'], [r.momentum, 'mom'], [r.yoy_accel_pp, 'pp'],
@@ -715,6 +724,19 @@ function renderDetail(t) {
       [r.eps_yoy, 'pct'], [r.dps, 'x'], [r.status, 'str'],
     ]),
     '加速度＝本季QoQ − 上季QoQ。同期加速度＝本季QoQ − 去年同季QoQ（不受淡旺季干擾）。'));
+
+  // ── 月營收：台股每月 10 日前公布上月營收，比季報早兩三個月透露轉折 ──
+  const mt = monthTable(MIDX.get(t) || [], cfg);
+  if (mt.length) {
+    sec.appendChild(subTable('月營收　·　台股獨有的高頻層',
+      ['月份', '月營收(百萬元)', '月增率', '年增率', '累計(百萬元)', '累計年增率'],
+      mt.map((r) => [
+        [r.ym, 'str', true], [r.rev, 'money'], [r.mom, 'pct'],
+        [r.yoy, 'pct'], [r.cum, 'money'], [r.cum_yoy, 'pct'],
+      ]),
+      '年增率排除淡旺季，是主要看的那個；累計年增率平滑掉出貨遞延，看的是趨勢。'
+      + '累計只在今年與去年同期都完整時才算，缺一個月就留空。'));
+  }
 }
 
 function subTable(title, headers, rows, note) {
@@ -807,8 +829,15 @@ $('#btn-add').onclick = () => {
 };
 $('#add-close').onclick = () => $('#dlg-add').close();
 $('#add-go').onclick = () => {
-  const t = $('#a-t').value.trim().toUpperCase();
-  if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t)) { alert('代號看起來不像台股代號，請確認。'); return; }
+  // 台股代號是四位數字，不以 0 開頭（0 開頭是 ETF，沒有財報、沒有月營收，
+  // 整張 Raw_Q 對它們是空的）。這裡要跟 add_ticker.py 與 export_json.py 的
+  // 正規表達式保持一致 —— 三處有一處沒改到，就會出現「網頁擋下來」或
+  // 「開了 Issue 但後端不收」這種對不起來的行為。
+  const t = $('#a-t').value.trim();
+  if (!/^[1-9]\d{3}$/.test(t)) {
+    alert('台股代號是四位數字（例如 2330、3008）。\n0 開頭的 ETF 沒有財報資料，暫不支援。');
+    return;
+  }
   // 不送 industry / name —— 留白讓 classify.py 自己判斷
   const body = [`ticker: ${t}`, `tier: ${pickValue('a-tier')}`,
     `tags: ${$('#a-tags').value.trim()}`, `note: ${$('#a-note').value.trim()}`,
@@ -818,7 +847,7 @@ $('#add-go').onclick = () => {
 };
 
 /* ── 載入與計算 ──────────────────────────────────── */
-let QIDX = new Map();
+let QIDX = new Map(), MIDX = new Map();
 
 function recompute() {
   const today = Date.now();
@@ -847,6 +876,7 @@ async function boot() {
   // 沒改過設定時，用 GitHub 上 config 的值；改過就以你自己存的為準
   cfg = { ...DEFAULTS, ...(DATA.defaults || {}), repo: cfg.repo, ...(saved || {}) };
   QIDX = indexQuarters(DATA.quarters);
+  MIDX = indexMonths(DATA.months);   // 月營收：台股獨有的高頻層
   $('#asof').textContent = `資料日期 ${DATA.generated || '—'}`;
   fillTierFilter($('#tier'), DATA.tickers);
   fillIndustryFilter($('#ind'), DATA.tickers);
