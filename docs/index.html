@@ -686,7 +686,8 @@ function renderDetail(t) {
   const m0 = monthTable(mrows, cfg)[0];
   if (m0) {
     cards.appendChild(card('月營收　' + m0.ym, fmt.money(m0.rev),
-      `年增 ${fmt.pct(m0.yoy)}・月增 ${fmt.pct(m0.mom)}`
+      `年增 ${fmt.pct(m0.yoy)}・加速度 ${fmt.pp(m0.accel_pp)} pp`
+      + (m0.momentum ? `・${m0.momentum}` : '')
       + (m0.cum_yoy == null ? '' : `・累計年增 ${fmt.pct(m0.cum_yoy)}`)));
   }
   sec.appendChild(cards);
@@ -729,13 +730,18 @@ function renderDetail(t) {
   const mt = monthTable(MIDX.get(t) || [], cfg);
   if (mt.length) {
     sec.appendChild(subTable('月營收　·　台股獨有的高頻層',
-      ['月份', '月營收(百萬元)', '月增率', '年增率', '累計(百萬元)', '累計年增率'],
+      ['月份', '月營收(百萬元)', '月增率', '月增加速度(pp)', '年增率',
+        '年增加速度(pp)', '動能判讀', '累計(百萬元)', '累計年增率'],
       mt.map((r) => [
         [r.ym, 'str', true], [r.rev, 'money'], [r.mom, 'pct'],
-        [r.yoy, 'pct'], [r.cum, 'money'], [r.cum_yoy, 'pct'],
+        [r.mom_accel_pp, 'pp'], [r.yoy, 'pct'], [r.accel_pp, 'pp'],
+        [r.momentum, 'mom'], [r.cum, 'money'], [r.cum_yoy, 'pct'],
       ]),
-      '年增率排除淡旺季，是主要看的那個；累計年增率平滑掉出貨遞延，看的是趨勢。'
-      + '累計只在今年與去年同期都完整時才算，缺一個月就留空。'));
+      '兩欄加速度看的東西不一樣。年增加速度已排除季節性，是趨勢轉折，'
+      + '動能判讀就是依它算的。月增加速度帶季節性 —— 每年同一個月會固定出現'
+      + '同方向的值（2 月工作天少必掉、3 月必彈），不能單看絕對值，'
+      + '要跟去年同月的這一欄比；它的用途是抓急單、拉貨提前或遞延這種'
+      + '季節性解釋不了的突發變化。'));
   }
 }
 
