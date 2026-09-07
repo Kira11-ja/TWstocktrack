@@ -212,6 +212,14 @@ export function computeSummary(t, rows, est, price, cfg, todayMs) {
    三個衍生指標的定義：
      · 月增率   本月 ÷ 上月 −1。台股淡旺季明顯，單看月增率容易被季節性騙。
      · 年增率   本月 ÷ 去年同月 −1。排除季節性，這是主要看的那個。
+     · 年增加速度  本月年增率 − 上月年增率（pp）。年增率的二階導數，
+                跟季度那層是同一個概念，只是快了兩三個月。已排除季節性，
+                所以搭配動能判讀的四象限：成長且加速／成長但減速／
+                衰退但收斂／衰退且惡化。
+     · 月增加速度  本月月增率 − 上月月增率（pp）。**這一欄帶季節性**，
+                每年同一個月會固定出現同方向的值，不能單看絕對值判斷好壞，
+                要跟去年同月的同一欄比。用途是抓急單、拉貨提前或遞延、
+                短期斷鏈這種季節性解釋不了的突發變化。
      · 累計年增率  今年 1 月到本月的累計 ÷ 去年同期累計 −1。
                   平滑掉單月的出貨遞延（例如 3 月的貨壓到 4 月出），
                   是判斷「趨勢」而非「單月雜訊」用的。
@@ -234,6 +242,21 @@ export function monthTable(rows, cfg) {
   for (const r of rows) if (isNum(r.rev)) rev.set(r.ym, r.rev);
   const ym = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
 
+  // 先把每個月的年增率算完，加速度才有前一個月可以減。
+  // 加速度用「年增率」的差，不用「月增率」的差 —— 台股淡旺季太明顯，
+  // 月增率的二階導數幾乎都是季節性雜訊（例如每年 2 月工作天少，
+  // 月增率必掉、3 月必彈，看起來永遠在「加速」又「減速」）。
+  // 年增率本身已經排除季節性，它的變化才是真的動能轉折。
+  const yoyOf = new Map();
+  const momOf = new Map();
+  for (const r of rows) {
+    const pp = String(r.ym || '').split('-');
+    const yy = Number(pp[0]), mm = Number(pp[1]);
+    if (!yy || !mm) continue;
+    yoyOf.set(r.ym, growth(r.rev, rev.get(ym(yy - 1, mm))));
+    momOf.set(r.ym, growth(r.rev, rev.get(mm === 1 ? ym(yy - 1, 12) : ym(yy, mm - 1))));
+  }
+
   const out = [];
   const n = cfg.months_shown ?? 18;
   for (const r of rows.slice(0, n)) {
@@ -251,11 +274,27 @@ export function monthTable(rows, cfg) {
       if (isNum(b)) cumPrev += b; else fullPrev = false;
     }
 
+    const yoy = yoyOf.get(r.ym);
+    const yoyPrev = yoyOf.get(prevYm);
+    // 年增加速度＝本月年增率 − 上月年增率（pp）。已排除季節性，看的是趨勢轉折。
+    const accel = (isNum(yoy) && isNum(yoyPrev)) ? (yoy - yoyPrev) * 100 : null;
+
+    const mom = momOf.get(r.ym);
+    const momPrev = momOf.get(prevYm);
+    // 月增加速度＝本月月增率 − 上月月增率（pp）。**帶季節性**，
+    // 每年同一個月會固定出現同方向的值（2 月工作天少必掉、3 月必彈），
+    // 所以不能單看數字大小，要跟「去年同月的這一欄」比才有意義。
+    // 它的用途是抓急單、拉貨提前／遞延、短期斷鏈這種季節性解釋不了的突發變化。
+    const momAccel = (isNum(mom) && isNum(momPrev)) ? (mom - momPrev) * 100 : null;
+
     out.push({
       ym: r.ym,
       rev: r.rev,
-      mom: growth(r.rev, rev.get(prevYm)),
-      yoy: growth(r.rev, rev.get(ym(y - 1, m))),
+      mom,
+      mom_accel_pp: momAccel,
+      yoy,
+      accel_pp: accel,
+      momentum: momentum(yoy, accel, cfg.accel_flat_pp),
       cum: full ? cum : null,
       cum_yoy: (full && fullPrev) ? growth(cum, cumPrev) : null,
     });
