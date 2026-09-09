@@ -71,10 +71,14 @@ def add_seq(df):
         out["key"] = []
         return out[OUT_COLS]
     df = df.copy()
+    # 同一類的保險：period_end 可能一部分是 date 物件、一部分是從 CSV 讀回來的
+    # 字串（例如某檔已從 tickers.csv 移除、這輪不重抓，舊列原樣留著）。
+    # 混型別的欄位一 rank 就拋 TypeError，所以排名前先統一成可比較的東西。
+    _pe = pd.to_datetime(df["period_end"], errors="coerce")
     actual = df.is_est == "N"
     df["seq"] = 0
-    df.loc[actual, "seq"] = (df[actual]
-                             .groupby("ticker")["period_end"]
+    df.loc[actual, "seq"] = (_pe[actual]
+                             .groupby(df.loc[actual, "ticker"])
                              .rank(ascending=False, method="first")
                              .astype(int))
     df["key"] = df.ticker.astype(str) + "|" + df.seq.astype(str)
@@ -83,13 +87,22 @@ def add_seq(df):
 
 def add_mseq(df):
     """月營收的 seq：由新到舊 1、2、3…（沒有預估列，所以不需要 0）。
-    月增率取 mseq 相鄰兩列，年增率取相差 12 的兩列 —— 跟季度表同一個取法。"""
+    月增率取 mseq 相鄰兩列，年增率取相差 12 的兩列 —— 跟季度表同一個取法。
+
+    ★ 排名用 ym 不用 month_end ★
+    month_end 有兩種來源：這次抓的是 datetime.date 物件，從 master_m.csv 讀回來的
+    是字串。只要有一檔的舊資料留了下來（例如它已經從 tickers.csv 移除、這輪不會
+    重抓），兩種型別就會混在同一欄，rank() 一比大小就拋：
+        TypeError: '<' not supported between instances of 'str' and 'datetime.date'
+    ym 是 "YYYY-MM" 的零填充字串，字典序就是時間序，而且兩邊來源都是字串，
+    型別不可能混。這比「記得每個讀檔的地方都要轉型」更難寫錯。
+    """
     if df.empty:
         out = df.copy()
         out["mseq"] = []
         return out[OUT_M_COLS]
     df = df.copy()
-    df["mseq"] = (df.groupby("ticker")["month_end"]
+    df["mseq"] = (df.groupby("ticker")["ym"]
                     .rank(ascending=False, method="first").astype(int))
     return df[OUT_M_COLS]
 
@@ -500,6 +513,12 @@ def main():
             else pd.DataFrame(columns=RAW_M_COLS)
         if MASTER_M.exists():
             m_old = pd.read_csv(MASTER_M, dtype={"ticker": str})
+            # 從 CSV 讀回來的日期是字串，這次抓的是 date 物件。
+            # 不統一的話，只要有舊資料活下來（例如某檔已從 tickers.csv 移除），
+            # 兩種型別就會混在同一欄，後續排序與 rank 都會炸。
+            if "month_end" in m_old.columns:
+                m_old["month_end"] = pd.to_datetime(
+                    m_old["month_end"], errors="coerce").dt.date
             m_old = m_old[~m_old.ticker.isin(set(m_new.ticker))] if len(m_new) \
                 else m_old
             m_new = pd.concat([m_new, m_old], ignore_index=True)
