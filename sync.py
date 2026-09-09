@@ -389,11 +389,18 @@ def cross_check_roe(df):
         return []
     implied = ok.eps_diluted_adj * ok.shares_diluted
     diff = (implied - ok.net_income).abs() / ok.net_income.abs()
-    bad = ok[diff > 0.05]
+    # 門檻放寬到 25%。原本設 5%，但那對真實資料太緊：
+    # EPS 的分母是「當期加權平均股數」，我們手上是「期末股本 ÷ 10」，
+    # 遇到現金增資、可轉債轉換、庫藏股註銷的那幾季，兩者本來就會差個一兩成。
+    # 而這道防線要抓的是「淨利欄位接到權益」，那種錯會差 20 倍以上（台積電是 900 倍），
+    # 25% 遠低於那個量級、又高於正常的股本漂移 —— 抓得到真的錯，不會天天叫。
+    bad = ok[diff > 0.25]
     notes = []
     for tk, g in bad.groupby("ticker"):
-        notes.append(f"{tk} 有 {len(g)} 季的「EPS×股數」與淨利差距超過 5%"
-                     f"（最舊 {g.period.iloc[-1]}）—— 請確認淨利欄位沒有接到權益")
+        worst = float(diff.loc[g.index].max())
+        notes.append(f"{tk} 有 {len(g)} 季的「EPS×股數」與淨利差距超過 25%"
+                     f"（最大 {worst:.0%}，最舊 {g.period.iloc[-1]}）"
+                     f"—— 差到數十倍就是淨利欄位接到權益了")
     return notes
 
 
@@ -452,12 +459,25 @@ def sanitize(df):
 
 # ───────────────────────── 主流程 ─────────────────────────
 def keep_others(new_rows, path):
-    """--only 只跑部分股票時，沒跑到的那些要沿用舊資料，不能被整份蓋掉。"""
+    """--only 只跑部分股票時，沒跑到的那些要沿用舊資料，不能被整份蓋掉。
+
+    ★ 台股代號是純數字，一定要指定 dtype ★
+    這次組出來的列，ticker 是 Python 的 str（"2330"）；從 CSV 讀回來的，
+    pandas 會推論成 int64（2330）。兩者 concat 之後同一欄有 int 也有 str，
+    sort_values 一比大小就拋：
+        TypeError: '<' not supported between instances of 'int' and 'str'
+    美股代號是字母，pandas 本來就當字串，所以這個坑只有台股踩得到。
+    第一次跑不會出事（沒有舊檔可讀），第二次跑才會 —— 所以測試一定要連跑兩次。
+    """
     new = pd.DataFrame(new_rows)
+    if "ticker" in new.columns:
+        new["ticker"] = new["ticker"].astype(str).str.strip()
     if path.exists():
-        old = pd.read_csv(path)
-        if len(new) and "ticker" in old.columns and "ticker" in new.columns:
-            old = old[~old.ticker.astype(str).isin(new.ticker.astype(str))]
+        old = pd.read_csv(path, dtype={"ticker": str})
+        if "ticker" in old.columns:
+            old["ticker"] = old["ticker"].astype(str).str.strip()
+            if len(new) and "ticker" in new.columns:
+                old = old[~old.ticker.isin(set(new.ticker))]
         new = pd.concat([new, old], ignore_index=True)
     return new.sort_values("ticker") if "ticker" in new.columns else new
 
