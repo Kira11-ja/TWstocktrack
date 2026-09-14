@@ -57,8 +57,15 @@ for c in MILLIONS:                      # 絕對金額 → 百萬，跟表頭的
 est_df = _read("raw_est.csv", ["fy1_end", "as_of"])
 price_df = _read("raw_price.csv", ["price_date", "next_earnings", "as_of"])
 tick_df = _read("tickers.csv", ["added"])
+# 月營收（台股獨有）。美股版沒有這一層，所以整段都是新增的。
+m_df = _read("raw_m.csv", ["month_end"])
+
+if len(m_df) and "revenue" in m_df.columns:
+    m_df["revenue"] = pd.to_numeric(m_df["revenue"], errors="coerce") / 1e6
+    raw_m = m_df.where(pd.notna(m_df), None).to_dict("records")
 
 raw_q = q_df.where(pd.notna(q_df), None).to_dict("records")
+raw_m = m_df.where(pd.notna(m_df), None).to_dict("records") if len(m_df) else []
 raw_est = est_df.where(pd.notna(est_df), None).to_dict("records")
 raw_price = price_df.where(pd.notna(price_df), None).to_dict("records")
 TICKERS = tick_df.where(pd.notna(tick_df), None).to_dict("records")
@@ -237,6 +244,48 @@ widths(ws, {gcl(i + 1): w for i, (_, w, _) in enumerate(PH)})
 ws.freeze_panes = "B2"
 
 # ===================== Config =====================
+# ===================== Raw_M（月營收）=====================
+# 台股每月 10 日前公布上月營收，是最高頻的基本面指標，美股完全沒有這一層。
+# mseq 由新到舊 1、2、3…（跟 Raw_Q 的 seq 同一個概念，只是沒有預估列所以不需要 0）。
+#
+# ymn 是 Python 這邊算好的「年*100+月」整數（202608）。Excel 端算累計營收時
+# 需要「今年 1 月到本月」這個區間，用文字的 "2026-08" 做大小比較在 LibreOffice
+# 不可靠，換成整數就只是單純的數值比較，兩邊都穩。
+MLAST = 2000
+MH = [("ticker", 9, None), ("ym", 10, None), ("ymn", 9, "0"),
+      ("month_end", 12, DATE), ("revenue", 14, NUM0), ("mseq", 7, "0"),
+      ("mkey", 12, None)]
+ws = wb.create_sheet("Raw_M")
+ws.append([h for h, _, _ in MH]); style_header(ws, 1, len(MH))
+
+
+def _ymn(v):
+    s = str(v or "").strip()
+    if len(s) >= 7 and s[4] == "-":
+        try:
+            return int(s[:4]) * 100 + int(s[5:7])
+        except ValueError:
+            return None
+    return None
+
+
+for row in raw_m:
+    ws.append([row.get("ticker"), row.get("ym"), _ymn(row.get("ym")),
+               row.get("month_end"), row.get("revenue"), row.get("mseq"),
+               f'{row.get("ticker")}|{row.get("mseq")}'])
+for r in range(2, len(raw_m) + 2):
+    for i, (_, _, fmt) in enumerate(MH):
+        c = ws.cell(row=r, column=i + 1); c.font, c.fill = FX_FONT, BOT_FILL
+        if fmt: c.number_format = fmt
+widths(ws, {gcl(i + 1): w for i, (_, w, _) in enumerate(MH)})
+ws.freeze_panes = "B2"
+ML = {k: gcl(i + 1) for i, (k, _, _) in enumerate(MH)}
+
+
+def RM(k):
+    return f"Raw_M!${ML[k]}$2:${ML[k]}${MLAST}"
+
+
 ws = wb.create_sheet("Config")
 ws.sheet_view.showGridLines = False
 ws["A1"] = "參數設定"; ws["A1"].font = TITLE_FONT
@@ -246,7 +295,10 @@ CFG = [("目標季數（每檔應有的實際季數）", 24, "0", "_Manifest 判
        ("毛利率五年平均取樣季數", 20, "0", "5 年平均毛利率的取樣範圍"),
        ("PEG 成長率下限", 0.05, PCT, "成長率低於此值時 PEG 顯示 N/M（PEG 在低成長時失真）"),
        ("分析師家數下限", 5, "0", "低於此值時共識預估信心不足，會出旗標"),
-       ("NTM 換算基準天數", 365, "0", "EPS_NTM 依 fy1_end 距今天數在 F1 / F2 之間加權")]
+       ("NTM 換算基準天數", 365, "0", "EPS_NTM 依 fy1_end 距今天數在 F1 / F2 之間加權"),
+       ("相對加速度的分母下限", 0.02, PCT,
+        "上季QoQ ≤ 0 或絕對值低於此值時，加速度(%) 顯示 N/M —— "
+        "分母是負的會翻轉符號（由衰退轉成長會變成大負數），接近零會爆成幾百%")]
 for i, (n, v, f, u) in enumerate(CFG):
     r = 4 + i
     ws.cell(row=r, column=1, value=n).font = Font(name=FONT, size=10)
@@ -317,12 +369,27 @@ add("rev_qoq2", "營收QoQ_上一季", PCT, 13, "成長",
     lambda r: wrap(f'{QQ("revenue",2,r)}/{QQ("revenue",3,r)}-1', r))
 add("rev_accel", "營收加速度(pp)", PP, 13, "成長",
     lambda r: wrap(f'({X("rev_qoq1",r)}-{X("rev_qoq2",r)})*100', r))
+# 加速度(%)＝(本季QoQ − 上季QoQ) ÷ |上季QoQ|，問的是「相對原本的速度加速多少」。
+# 分母 ≤ 0 會翻轉符號、接近零會爆成幾百%，兩種都不可信，所以一律 N/M（門檻在 Config!B9）。
+add("rev_accel_rel", "營收加速度(%)", PCT, 13, "成長",
+    lambda r: f'=IF($A{r}="","",IFERROR(IF(OR(NOT(ISNUMBER({X("rev_qoq1",r)})),'
+              f'NOT(ISNUMBER({X("rev_qoq2",r)})),{X("rev_qoq2",r)}<=0,'
+              f'ABS({X("rev_qoq2",r)})<Config!$B$9),"N/M",'
+              f'({X("rev_qoq1",r)}-{X("rev_qoq2",r)})/ABS({X("rev_qoq2",r)})),"N/M"))')
 add("momentum", "動能判讀", None, 14, "成長",
+    # 六象限。中間兩種（由正轉負 / 由負轉正）是台股版新增的轉折標記：
+    # 加速度(%) 在上季QoQ ≤ 0 時是 N/M，而「上季衰退、本季成長」正是最該抓到的轉折，
+    # 所以判讀改成先看符號組合，永遠給得出答案。
     lambda r: f'=IF($A{r}="","",IFERROR(IF(NOT(ISNUMBER({X("rev_qoq1",r)})),"",'
+              f'IF(AND(ISNUMBER({X("rev_qoq2",r)}),{X("rev_qoq2",r)}>0,'
+              f'{X("rev_qoq1",r)}<=0),"由正轉負",'
+              f'IF(AND(ISNUMBER({X("rev_qoq2",r)}),{X("rev_qoq2",r)}<=0,'
+              f'{X("rev_qoq1",r)}>0),"由負轉正",'
               f'IF({X("rev_qoq1",r)}>0,'
               f'IF({X("rev_accel",r)}>0,"成長且加速","成長但減速"),'
-              f'IF({X("rev_accel",r)}>0,"衰退但收斂","衰退且惡化"))),""))')
-add("rev_accel_sa", "同期加速度(pp)", PP, 13, "成長",
+              f'IF({X("rev_accel",r)}>0,"衰退但收斂","衰退且惡化"))))),""))')
+# 同期成長率＝本季QoQ − 去年同季QoQ。跟去年同一季比，淡旺季在兩邊同時出現、相減抵銷。
+add("rev_accel_sa", "同期成長率(pp)", PP, 13, "成長",
     lambda r: wrap(f'({X("rev_qoq1",r)}'
                    f'-({QQ("revenue",5,r)}/{QQ("revenue",6,r)}-1))*100', r))
 add("eps_yoy1", "EPS_YoY_最新季", PCT, 13, "成長",
@@ -396,24 +463,25 @@ ws.cell(row=NROW + 2, column=1,
 
 # ===================== Dashboard =====================
 DASH = [
+    # 欄位順序跟網頁總覽一致：毛利率 → ROE → 成長 → 預估 → 估值 → 殖利率 → 參考。
+    # Excel 的基本組多一個「等級」欄（網頁把它塞在公司名底下）。
     ("基本", [("ticker", "Ticker", 10), ("company", "公司", 18),
               ("tier", "等級", 8), ("price", "股價", 10)]),
+    ("毛利率", [("gm_ttm", "毛利率", 10), ("gm_5y", "5年平均", 10)]),
+    ("ROE", [("roe_ttm", "ROE_TTM", 10), ("roe_5avg", "ROE_5年平均", 11),
+             ("roe_f", "ROE Forward", 11)]),
+    ("成長", [("rev_qoq1", "營收QoQ", 10), ("rev_accel_rel", "加速度(%)", 11),
+              ("momentum", "動能判讀", 13), ("rev_accel_sa", "同期成長率(pp)", 13)]),
+    ("預估", [("eps_q_est", "當季EPS預估", 12)]),
     ("估值", [("pe_ttm", "PE_TTM", 9), ("pe_ntm", "PE Forward", 11),
               ("peg_t", "PEG_T", 8), ("peg_f", "PEG_F", 8)]),
     ("殖利率", [("div_yield", "殖利率", 9), ("dps_yoy", "配息YoY", 10)]),
-    ("成長", [("rev_qoq1", "營收QoQ", 10), ("rev_qoq2", "上季QoQ", 10),
-              ("rev_accel", "加速度(pp)", 11), ("momentum", "動能判讀", 13),
-              ("rev_accel_sa", "同期加速度(pp)", 13), ("rev_yoy1", "營收YoY", 10),
-              ("eps_yoy1", "EPS_YoY", 10), ("eps_ttm_yoy", "EPS_TTM_YoY", 11)]),
-    ("毛利率", [("gm_ttm", "毛利率", 10), ("gm_5y", "5年平均", 10),
-               ("gm_spread", "vs5年(bps)", 11), ("gm_dyoy", "ΔGM_YoY(bps)", 12)]),
-    ("ROE", [("roe_ttm", "ROE_TTM", 10), ("roe_5avg", "ROE_5年平均", 11),
-             ("roe_f", "ROE Forward", 11)]),
-    ("預估", [("eps_q_est", "當季EPS預估", 12), ("est_period", "預估期別", 11),
-              ("est_src", "來源", 11), ("next_er", "下次財報", 11)]),
+    ("參考", [("est_period", "預估期別", 11), ("est_src", "來源", 11),
+              ("next_er", "下次財報", 11)]),
 ]
 GRP_COLORS = {"基本": "D9E2F3", "估值": "FCE4D6", "殖利率": "E7E6E6", "成長": "E2EFDA",
-              "毛利率": "FFF2CC", "ROE": "F2E3F1", "預估": "DEEBF7"}
+              "毛利率": "FFF2CC", "ROE": "F2E3F1", "預估": "DEEBF7",
+              "參考": "EFEFEF"}
 ws = wb.create_sheet("Dashboard")
 ws.sheet_view.showGridLines = False
 flat, col = [], 1
@@ -452,22 +520,29 @@ for grp, cols in DASH:
 
 DC = {name: gcl(c) for c, name, _ in flat}
 rng = lambda n: f"{DC[n]}3:{DC[n]}{NROW + 1}"
-ws.conditional_formatting.add(rng("rev_accel_sa"),
-    ColorScaleRule(start_type="num", start_value=-8, start_color=RED,
-                   mid_type="num", mid_value=0, mid_color="FFFFFF",
-                   end_type="num", end_value=8, end_color=GRN))
-ws.conditional_formatting.add(rng("rev_accel"),
-    ColorScaleRule(start_type="num", start_value=-30, start_color=RED,
-                   mid_type="num", mid_value=0, mid_color="FFFFFF",
-                   end_type="num", end_value=30, end_color=GRN))
+
+def cf(name, rule):
+    """只對「這次真的有排進 Dashboard」的欄位上色。
+
+    DASH 的欄位會隨版面調整增減，但條件式格式是另一份清單 ——
+    兩邊不同步時 DC[name] 會直接 KeyError 讓整份 Excel 產不出來。
+    這裡改成查得到才套，版面之後怎麼改都不會再炸。"""
+    if name in DC:
+        ws.conditional_formatting.add(rng(name), rule)
+
+def scale(lo, hi):
+    return ColorScaleRule(start_type="num", start_value=lo, start_color=RED,
+                          mid_type="num", mid_value=0, mid_color="FFFFFF",
+                          end_type="num", end_value=hi, end_color=GRN)
+
+cf("rev_accel_sa", scale(-8, 8))          # pp
+cf("rev_accel", scale(-30, 30))           # pp
+cf("rev_accel_rel", scale(-0.5, 0.5))     # 比例，不是 pp —— 色階要用 ±50% 而不是 ±30
 for n in ("gm_dyoy", "gm_spread"):
-    ws.conditional_formatting.add(rng(n),
-        ColorScaleRule(start_type="num", start_value=-200, start_color=RED,
-                       mid_type="num", mid_value=0, mid_color="FFFFFF",
-                       end_type="num", end_value=200, end_color=GRN))
+    cf(n, scale(-200, 200))
 for n in ("rev_qoq1", "rev_yoy1", "div_yield", "roe_ttm"):
-    ws.conditional_formatting.add(rng(n),
-        ColorScaleRule(start_type="min", start_color="FFFFFF", end_type="max", end_color=GRN))
+    cf(n, ColorScaleRule(start_type="min", start_color="FFFFFF",
+                         end_type="max", end_color=GRN))
 for n in ("peg_t", "peg_f"):
     ws.conditional_formatting.add(rng(n),
         CellIsRule(operator="lessThan", formula=["1.5"],
@@ -509,7 +584,10 @@ def CK(name):
 
 ws["A1"] = "個股卡"; ws["A1"].font = TITLE_FONT
 ws["A2"] = "選擇股票 →"; ws["A2"].font = Font(name=FONT, bold=True, size=11)
-b2 = ws["B2"]; b2.value = "AAPL"
+# 預設選第一檔 —— 不能寫死代號。美股版寫死 "AAPL"，台股版沿用的話
+# Stock_Card 一打開就是 #N/A（MATCH 找不到這個代號），要手動選才會正常。
+b2 = ws["B2"]
+b2.value = str(TICKERS[0].get("ticker")) if TICKERS else ""
 b2.font = Font(name=FONT, bold=True, size=13, color="0000FF")
 b2.fill = PatternFill("solid", fgColor="FFFF00")
 b2.alignment = Alignment(horizontal="center")
@@ -848,6 +926,124 @@ ws.cell(row=30, column=1, value="↓ 這張就是「每季營收成長率」，�
 ws.freeze_panes = "B5"
 
 # ===================== _Manifest =====================
+# ===================== 月營收檢視 =====================
+# 跟「季度檢視」同一個作法：由 Stock_Card 的下拉驅動，用 SUMIFS 依 mseq 取區間。
+ws = wb.create_sheet("月營收檢視")
+ws.sheet_view.showGridLines = False
+ws["A1"] = "月營收檢視  ·  近 18 個月"; ws["A1"].font = TITLE_FONT
+ws["A2"] = "股票"; ws["A2"].font = Font(name=FONT, bold=True, size=10)
+ws["B2"] = f'={TSEL}'; ws["B2"].font = Font(name=FONT, bold=True, size=12, color="008000")
+ws["C2"] = ("← 與 Stock_Card 同步。台股每月 10 日前公布上月營收，"
+            "比季報早兩三個月透露轉折。")
+ws["C2"].font = NOTE_FONT
+
+
+def SM(k):
+    """第 k 個月（由新到舊，1 = 最新）的營收。"""
+    return f'SUMIFS({RM("revenue")},{RM("ticker")},{TSEL},{RM("mseq")},{k})'
+
+
+def SYMN(k):
+    """第 k 個月的 ymn（年*100+月）。"""
+    return f'SUMIFS({RM("ymn")},{RM("ticker")},{TSEL},{RM("mseq")},{k})'
+
+
+def MOM(k):
+    return f'({SM(k)}/{SM(k + 1)}-1)'
+
+
+def MYOY(k):
+    return f'({SM(k)}/{SM(k + 12)}-1)'
+
+
+def REL(now, prev):
+    """相對加速度，門檻與網頁共用 Config!$B$9。分母 ≤ 0 或太小一律 N/M。"""
+    return (f'IF(OR(NOT(ISNUMBER({prev})),{prev}<=0,ABS({prev})<Config!$B$9),'
+            f'"N/M",({now}-{prev})/ABS({prev}))')
+
+
+def CUM(k, back_years=0):
+    """今年（或去年同期）1 月到本月的累計營收。
+
+    區間用 ymn 的數值比較：>= 年*100+1 且 <= 本月的 ymn。
+    back_years=1 就是去年同一段區間。"""
+    y = f'(INT({SYMN(k)}/100)-{back_years})'
+    m = f'MOD({SYMN(k)},100)'
+    lo = f'({y}*100+1)'
+    hi = f'({y}*100+{m})'
+    return (f'SUMIFS({RM("revenue")},{RM("ticker")},{TSEL},'
+            f'{RM("ymn")},">="&{lo},{RM("ymn")},"<="&{hi})')
+
+
+def CUMN(k, back_years=0):
+    """同一段區間裡實際有幾個月 —— 用來確認累計是完整的。"""
+    y = f'(INT({SYMN(k)}/100)-{back_years})'
+    m = f'MOD({SYMN(k)},100)'
+    lo = f'({y}*100+1)'
+    hi = f'({y}*100+{m})'
+    return (f'COUNTIFS({RM("ticker")},{TSEL},'
+            f'{RM("ymn")},">="&{lo},{RM("ymn")},"<="&{hi})')
+
+
+MHDR = [("月份", 10, None), ("月營收(百萬元)", 14, NUM0),
+        ("月增率", 10, PCT), ("月增加速度(pp)", 13, PP), ("月增加速度(%)", 13, PCT),
+        ("年增率", 10, PCT), ("年增加速度(pp)", 13, PP), ("年增加速度(%)", 13, PCT),
+        ("動能判讀", 13, None), ("累計(百萬元)", 14, NUM0), ("累計年增率", 11, PCT)]
+for j, (h, w, _) in enumerate(MHDR):
+    ws.cell(row=4, column=1 + j, value=h)
+    ws.column_dimensions[gcl(1 + j)].width = w
+style_header(ws, 4, len(MHDR))
+
+for i in range(18):
+    k = i + 1
+    r = 5 + i
+    g = lambda e: f'=IF({TSEL}="","",IFERROR({e},""))'
+    gn = lambda e: f'=IF({TSEL}="","",IFERROR({e},"N/M"))'
+
+    # 月份標籤直接取 Raw_M 現成的 ym 字串。
+    # 原本用 TEXT(INT(ymn/100))&"-"&TEXT(MOD(ymn,100)) 自己拼，
+    # 除了容易漏括號（漏掉會被外層 IFERROR 的括號補上，變成語法合法但語意錯的公式），
+    # 也沒必要 —— 資料裡本來就有這個欄位。
+    ws.cell(row=r, column=1, value=g(
+        f'INDEX({RM("ym")},MATCH({TSEL}&"|{k}",{RM("mkey")},0))'
+    )).alignment = Alignment(horizontal="left")
+    ws.cell(row=r, column=2, value=g(SM(k))).number_format = NUM0
+    ws.cell(row=r, column=3, value=g(MOM(k))).number_format = PCT
+    ws.cell(row=r, column=4,
+            value=g(f'({MOM(k)}-{MOM(k + 1)})*100')).number_format = PP
+    ws.cell(row=r, column=5,
+            value=gn(REL(MOM(k), MOM(k + 1)))).number_format = PCT
+    ws.cell(row=r, column=6, value=g(MYOY(k))).number_format = PCT
+    ws.cell(row=r, column=7,
+            value=g(f'({MYOY(k)}-{MYOY(k + 1)})*100')).number_format = PP
+    ws.cell(row=r, column=8,
+            value=gn(REL(MYOY(k), MYOY(k + 1)))).number_format = PCT
+    # 動能判讀用年增率（已排除季節性），六象限，永遠給得出答案
+    now, prev = MYOY(k), MYOY(k + 1)
+    accel = f'({now}-{prev})*100'
+    ws.cell(row=r, column=9, value=g(
+        f'IF(AND({prev}>0,{now}<=0),"由正轉負",'
+        f'IF(AND({prev}<=0,{now}>0),"由負轉正",'
+        f'IF({now}>0,IF({accel}>0,"成長且加速","成長但減速"),'
+        f'IF({accel}>0,"衰退但收斂","衰退且惡化"))))'))
+    ws.cell(row=r, column=10, value=g(CUM(k))).number_format = NUM0
+    # 累計年增率只在今年與去年同期都完整時才算 —— 缺一個月，
+    # 分母少一段會讓累計年增率無聲地虛高。
+    ws.cell(row=r, column=11, value=gn(
+        f'IF(OR({CUMN(k)}<>MOD({SYMN(k)},100),'
+        f'{CUMN(k, 1)}<>MOD({SYMN(k)},100)),"N/M",'
+        f'{CUM(k)}/{CUM(k, 1)}-1)')).number_format = PCT
+
+for r in range(5, 23):
+    for c in range(1, len(MHDR) + 1):
+        cell = ws.cell(row=r, column=c)
+        cell.font = FX_FONT
+ws["A24"] = ("年增加速度是主要看的那個（年增率已排除季節性），動能判讀就是依它算的。"
+             "月增加速度對急單與突發斷鏈最敏感、早一步，但帶季節性 —— "
+             "每年 2 月工作天少必掉、3 月必彈，要跟去年同月比才有意義。")
+ws["A24"].font = NOTE_FONT
+ws.freeze_panes = "A5"
+
 ws = wb.create_sheet("_Manifest")
 ws.sheet_view.showGridLines = False
 ws["A1"] = "資料完整度儀表板"; ws["A1"].font = TITLE_FONT
@@ -975,8 +1171,11 @@ for kind, text in ROWS:
 
 # ===================== 存檔 =====================
 wb["Calc"].sheet_state = "hidden"
+# ★ 這份清單決定最後留下哪些分頁、依什麼順序 ★
+# 沒列到的分頁會被整張丟掉，而且不會有任何錯誤訊息 —— 新增分頁一定要同步加進來。
 wb._sheets = [wb[n] for n in ["說明", "Dashboard", "Stock_Card", "年度檢視", "季度檢視",
-                              "_Manifest", "Tickers", "Raw_Q", "Raw_Est", "Raw_Price",
+                              "月營收檢視", "_Manifest", "Tickers",
+                              "Raw_Q", "Raw_M", "Raw_Est", "Raw_Price",
                               "Calc", "Config"]]
 wb.active = 1
 OUT = Path(__file__).parent / "台股觀察表.xlsx"
