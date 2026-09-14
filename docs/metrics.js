@@ -8,6 +8,7 @@ export const DEFAULTS = {
   min_analysts: 5,        // 分析師家數低於此值 → 預估信心不足，出旗標
   ntm_days: 365,          // EPS_NTM 依 fy1_end 距今天數在 F1 / F2 之間加權
   accel_flat_pp: 0,       // 加速度絕對值小於此值視為「持平」（0＝完全比照 Excel）
+  accel_rel_min_base: 0.02, // 相對加速度的分母下限：|上期成長率| 小於此值就 N/M
   quarters_shown: 12,
   years_shown: 6,
 };
@@ -94,12 +95,57 @@ export function indexQuarters(quarters) {
   return by;
 }
 
-export function momentum(qoq, accelPp, flatPp) {
-  if (!isNum(qoq) || !isNum(accelPp)) return null;
-  if (flatPp > 0 && Math.abs(accelPp) < flatPp) {
-    return qoq > 0 ? '成長持平' : '衰退持平';
+/* 相對加速度 —— 「這次比上次加速了多少％」。
+
+   pp 版（相減）回答「絕對多衝了幾個百分點」，跨股可比、永遠算得出來；
+   % 版（相除）回答「相對於原本的速度，加速的幅度有多大」。
+   兩者會給出不同的排序，而且都對：
+     台積電  8.4% → 12.0%   pp +3.60   % +43%
+     華邦電 43.7% → 56.4%   pp +12.77  % +29%
+   pp 說華邦電猛三倍，% 說台積電才猛 —— 因為華邦電本來就衝在 43.7%。
+
+   ★ 分母是相除版唯一的弱點 ★
+   上期成長率若是負的，相除會翻轉符號：聯電 −1.2% → +12.6% 明明是由衰退轉成長
+   （最該被抓到的轉折），相除卻得到 −1150%，看起來像急速惡化。
+   上期接近零也一樣：0.1% → 2% 會算出 +1900%，數字大到沒有意義。
+   所以分母 ≤ 0 或絕對值小於 minBase 時一律回 null（顯示 N/M），不硬算。
+   分母取絕對值是多一道保險，正常路徑上 prev 已經 > 0。 */
+export function relAccel(now, prev, minBase) {
+  // 缺資料回 null（顯示「—」），被門檻擋下來回 NM（顯示「N/M」）。
+  // 兩者要分得出來 —— 前者是「還沒抓到」，後者是「抓到了但這個口徑不可信」。
+  if (!isNum(now) || !isNum(prev)) return null;
+  const base = Math.abs(prev);
+  if (prev <= 0 || base < (minBase ?? 0.02)) return NM;
+  return (now - prev) / base;
+}
+
+/* 動能判讀 —— 六種情況，永遠給得出答案。
+
+   為什麼不直接判斷「加速度(%)」：那一欄在上期成長率 ≤ 0 時會是 N/M，
+   而「上期衰退、本期成長」正是由負轉正的轉折 —— 最該被抓到的那一刻。
+   照著 N/M 走，等於把最有價值的訊號丟掉。
+
+   所以改成先看**符號組合**，再看加速度的正負：
+
+     上期 正 → 本期 正、更快    成長且加速
+     上期 正 → 本期 正、變慢    成長但減速
+     上期 正 → 本期 負          由正轉負   ← 衰退的第一季
+     上期 負 → 本期 正          由負轉正   ← 反轉的第一季
+     上期 負 → 本期 負、跌幅收斂 衰退但收斂
+     上期 負 → 本期 負、跌幅擴大 衰退且惡化
+
+   前兩種和後兩種跟美股版完全一致，中間兩種是台股版新增的轉折標記。 */
+export function momentum(now, prev, accelPp, flatPp) {
+  if (!isNum(now)) return null;
+  if (isNum(prev)) {
+    if (prev > 0 && now <= 0) return '由正轉負';
+    if (prev <= 0 && now > 0) return '由負轉正';
   }
-  if (qoq > 0) return accelPp > 0 ? '成長且加速' : '成長但減速';
+  if (!isNum(accelPp)) return null;
+  if (flatPp > 0 && Math.abs(accelPp) < flatPp) {
+    return now > 0 ? '成長持平' : '衰退持平';
+  }
+  if (now > 0) return accelPp > 0 ? '成長且加速' : '成長但減速';
   return accelPp > 0 ? '衰退但收斂' : '衰退且惡化';
 }
 
@@ -149,10 +195,12 @@ export function computeSummary(t, rows, est, price, cfg, todayMs) {
   o.rev_qoq_prev = growth(at('rev', 2), at('rev', 3));
   o.accel_pp = (isNum(o.rev_qoq) && isNum(o.rev_qoq_prev))
     ? (o.rev_qoq - o.rev_qoq_prev) * 100 : null;
-  o.momentum = momentum(o.rev_qoq, o.accel_pp, cfg.accel_flat_pp);
+  o.accel_rel = relAccel(o.rev_qoq, o.rev_qoq_prev, cfg.accel_rel_min_base);
+  o.momentum = momentum(o.rev_qoq, o.rev_qoq_prev, o.accel_pp, cfg.accel_flat_pp);
   const qoqYearAgo = growth(at('rev', 5), at('rev', 6));
   o.yoy_accel_pp = (isNum(o.rev_qoq) && isNum(qoqYearAgo))
     ? (o.rev_qoq - qoqYearAgo) * 100 : null;
+  o.yoy_accel_rel = relAccel(o.rev_qoq, qoqYearAgo, cfg.accel_rel_min_base);
   o.eps_yoy_q = growth(at('eps', 1), at('eps', 5));
 
   o.gm_ttm = div(S('gp', 1, 4), o.rev_ttm);
@@ -292,9 +340,11 @@ export function monthTable(rows, cfg) {
       rev: r.rev,
       mom,
       mom_accel_pp: momAccel,
+      mom_accel_rel: relAccel(mom, momPrev, cfg.accel_rel_min_base),
       yoy,
       accel_pp: accel,
-      momentum: momentum(yoy, accel, cfg.accel_flat_pp),
+      accel_rel: relAccel(yoy, yoyPrev, cfg.accel_rel_min_base),
+      momentum: momentum(yoy, yoyPrev, accel, cfg.accel_flat_pp),
       cum: full ? cum : null,
       cum_yoy: (full && fullPrev) ? growth(cum, cumPrev) : null,
     });
@@ -316,8 +366,10 @@ export function quarterTable(rows, cfg) {
     const gmYearAgo = div(at('gp', s + 4), at('rev', s + 4));
     out.push({
       period: r.period, end: r.end, rev: r.rev, qoq, prev_qoq: prev, accel_pp: accel,
-      momentum: momentum(qoq, accel, cfg.accel_flat_pp),
+      accel_rel: relAccel(qoq, prev, cfg.accel_rel_min_base),
+      momentum: momentum(qoq, prev, accel, cfg.accel_flat_pp),
       yoy_accel_pp: (isNum(qoq) && isNum(qoqYearAgo)) ? (qoq - qoqYearAgo) * 100 : null,
+      yoy_accel_rel: relAccel(qoq, qoqYearAgo, cfg.accel_rel_min_base),
       rev_yoy: growth(at('rev', s), at('rev', s + 4)),
       gm, dgm_yoy_bps: (isNum(gm) && isNum(gmYearAgo)) ? (gm - gmYearAgo) * 10000 : null,
       eps: r.eps, eps_yoy: growth(at('eps', s), at('eps', s + 4)),
@@ -328,7 +380,8 @@ export function quarterTable(rows, cfg) {
   if (e0) {
     out.push({
       period: e0.period, end: e0.end, rev: null, qoq: null, prev_qoq: null,
-      accel_pp: null, momentum: null, yoy_accel_pp: null, rev_yoy: null,
+      accel_pp: null, accel_rel: null, momentum: null,
+      yoy_accel_pp: null, yoy_accel_rel: null, rev_yoy: null,
       gm: null, dgm_yoy_bps: null, eps: e0.eps, eps_yoy: null, dps: null, status: '預估',
     });
   }
