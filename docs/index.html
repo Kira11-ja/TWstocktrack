@@ -74,6 +74,9 @@ tbody tr.sel{background:var(--accent-soft)}
 .b-gd{background:rgba(138,109,0,.16);color:var(--flat)}
 .b-sc{background:rgba(138,109,0,.16);color:var(--flat)}
 .b-sd{background:rgba(192,39,45,.14);color:var(--down)}
+/* 兩個轉折徽章用外框標出來 —— 它們是「第一次」發生，比程度變化值得停一下 */
+.b-tp{background:rgba(10,125,63,.18);color:var(--up);box-shadow:inset 0 0 0 1px currentColor}
+.b-tn{background:rgba(192,39,45,.18);color:var(--down);box-shadow:inset 0 0 0 1px currentColor}
 .tier{font-size:11.5px;color:var(--dim)}
 .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
 .tag{font-size:11px;padding:0 6px;border-radius:4px;border:1px solid var(--line);
@@ -326,7 +329,8 @@ function cell(value, kind) {
 const signCls = (v) => !isNum(v) ? '' : (v > 0 ? 'up' : v < 0 ? 'down' : '');
 
 const MOM_CLASS = { '成長且加速': 'b-ga', '成長但減速': 'b-gd', '成長持平': 'b-gd',
-  '衰退但收斂': 'b-sc', '衰退持平': 'b-sc', '衰退且惡化': 'b-sd' };
+  '衰退但收斂': 'b-sc', '衰退持平': 'b-sc', '衰退且惡化': 'b-sd',
+  '由負轉正': 'b-tp', '由正轉負': 'b-tn' };
 function momCell(v) {
   const td = el('td');
   if (!v) { td.textContent = '—'; return td; }
@@ -337,33 +341,42 @@ function momCell(v) {
 
 /* ── 總覽表定義 ──────────────────────────────────── */
 const GROUPS = [
-  ['基本', 3], ['估值', 4], ['殖利率', 2], ['成長', 7], ['毛利率', 4], ['ROE', 3], ['預估', 3],
+  ['基本', 3], ['毛利率', 2], ['ROE', 3], ['成長', 4],
+  ['預估', 1], ['估值', 4], ['殖利率', 2], ['參考', 2],
 ];
 const COLS = [
   { k: 't', h: 'Ticker', kind: 'tk', l: true },
   { k: 'name', h: '公司', kind: 'str', l: true },
   { k: 'price', h: '股價', kind: 'x' },
+
+  { k: 'gm_ttm', h: '毛利率', kind: 'pctp' },
+  { k: 'gm_5y', h: '5年平均', kind: 'pctp' },
+
+  { k: 'roe_ttm', h: 'ROE_TTM', kind: 'pctp' },
+  { k: 'roe_5y', h: 'ROE_5年平均', kind: 'pctp' },
+  { k: 'roe_fwd', h: 'ROE Forward', kind: 'pctp' },
+
+  // 加速度兩種口徑並排：
+  //   pp  ＝ 本季QoQ − 上季QoQ            絕對多衝了幾個百分點，永遠算得出來
+  //   %   ＝ (本季QoQ − 上季QoQ) ÷ 上季QoQ  相對於原本的速度加速了多少
+  // 「上季QoQ」那一欄拿掉了 —— 它只是加速度的中間值，沒有獨立資訊。
+  { k: 'rev_qoq', h: '營收QoQ', kind: 'pct' },
+  { k: 'accel_rel', h: '加速度(%)', kind: 'pct' },
+  { k: 'momentum', h: '動能判讀', kind: 'mom' },
+  // 同期成長率＝本季QoQ − 去年同季QoQ，單位 pp。跟去年同一季比，
+  // 季節性在兩邊同時出現、相減就抵銷掉，所以它是排除淡旺季後的動能。
+  { k: 'yoy_accel_pp', h: '同期成長率(pp)', kind: 'pp' },
+
+  { k: 'est_eps', h: '當季EPS預估', kind: 'x' },
+
   { k: 'pe_ttm', h: 'PE_TTM', kind: 'x' },
   { k: 'pe_ntm', h: 'PE Forward', kind: 'x' },
   { k: 'peg_t', h: 'PEG_T', kind: 'x' },
   { k: 'peg_f', h: 'PEG_F', kind: 'x' },
+
   { k: 'yield', h: '殖利率', kind: 'pct2' },
   { k: 'dps_yoy', h: '配息YoY', kind: 'pct' },
-  { k: 'rev_qoq', h: '營收QoQ', kind: 'pct' },
-  { k: 'rev_qoq_prev', h: '上季QoQ', kind: 'pct' },
-  { k: 'accel_pp', h: '加速度(pp)', kind: 'pp' },
-  { k: 'momentum', h: '動能判讀', kind: 'mom' },
-  { k: 'yoy_accel_pp', h: '同期加速度(pp)', kind: 'pp' },
-  { k: 'rev_yoy_q', h: '營收YoY', kind: 'pct' },
-  { k: 'eps_yoy_q', h: 'EPS_YoY', kind: 'pct' },
-  { k: 'gm_ttm', h: '毛利率', kind: 'pctp' },
-  { k: 'gm_5y', h: '5年平均', kind: 'pctp' },
-  { k: 'gm_vs_5y_bps', h: 'vs5年(bps)', kind: 'bps' },
-  { k: 'dgm_yoy_bps', h: 'ΔGM_YoY(bps)', kind: 'bps' },
-  { k: 'roe_ttm', h: 'ROE_TTM', kind: 'pctp' },
-  { k: 'roe_5y', h: 'ROE_5年平均', kind: 'pctp' },
-  { k: 'roe_fwd', h: 'ROE Forward', kind: 'pctp' },
-  { k: 'est_eps', h: '當季EPS預估', kind: 'x' },
+
   { k: 'est_period', h: '預估期別', kind: 'str' },
   { k: 'next_earnings', h: '下次財報', kind: 'date' },
 ];
@@ -716,25 +729,32 @@ function renderDetail(t) {
 
   const qt = quarterTable(rows, cfg);
   sec.appendChild(subTable('季度檢視　·　加速度只做在這一層',
-    ['期別', '期末日', '營收(百萬元)', '營收QoQ', '上一季QoQ', '加速度(pp)', '動能判讀',
-      '同期加速度(pp)', '營收YoY', '毛利率', 'ΔGM_YoY(bps)', 'EPS', 'EPS YoY', '每股配息', '狀態'],
+    ['期別', '期末日', '營收(百萬元)', '營收QoQ', '上一季QoQ', '加速度(pp)', '加速度(%)',
+      '動能判讀', '同期成長率(pp)', '營收YoY', '毛利率', 'ΔGM_YoY(bps)',
+      'EPS', 'EPS YoY', '每股配息', '狀態'],
     qt.map((r) => [
       [r.period, 'str', true], [r.end, 'date'], [r.rev, 'money'], [r.qoq, 'pct'],
-      [r.prev_qoq, 'pct'], [r.accel_pp, 'pp'], [r.momentum, 'mom'], [r.yoy_accel_pp, 'pp'],
+      [r.prev_qoq, 'pct'], [r.accel_pp, 'pp'], [r.accel_rel, 'pct'],
+      [r.momentum, 'mom'], [r.yoy_accel_pp, 'pp'],
       [r.rev_yoy, 'pct'], [r.gm, 'pctp'], [r.dgm_yoy_bps, 'bps'], [r.eps, 'x'],
       [r.eps_yoy, 'pct'], [r.dps, 'x'], [r.status, 'str'],
     ]),
-    '加速度＝本季QoQ − 上季QoQ。同期加速度＝本季QoQ − 去年同季QoQ（不受淡旺季干擾）。'));
+    '加速度(pp)＝本季QoQ − 上季QoQ。加速度(%)＝再除以上季QoQ，'
+    + '看「相對原本的速度加速多少」—— 上季QoQ ≤ 0 或太接近零時顯示 N/M，'
+    + '因為相除會翻轉符號或爆成幾百%。'
+    + '同期成長率＝本季QoQ − 去年同季QoQ，跟去年同一季比，淡旺季相減後抵銷。'));
 
   // ── 月營收：台股每月 10 日前公布上月營收，比季報早兩三個月透露轉折 ──
   const mt = monthTable(MIDX.get(t) || [], cfg);
   if (mt.length) {
     sec.appendChild(subTable('月營收　·　台股獨有的高頻層',
-      ['月份', '月營收(百萬元)', '月增率', '月增加速度(pp)', '年增率',
-        '年增加速度(pp)', '動能判讀', '累計(百萬元)', '累計年增率'],
+      ['月份', '月營收(百萬元)', '月增率', '月增加速度(pp)', '月增加速度(%)',
+        '年增率', '年增加速度(pp)', '年增加速度(%)', '動能判讀',
+        '累計(百萬元)', '累計年增率'],
       mt.map((r) => [
         [r.ym, 'str', true], [r.rev, 'money'], [r.mom, 'pct'],
-        [r.mom_accel_pp, 'pp'], [r.yoy, 'pct'], [r.accel_pp, 'pp'],
+        [r.mom_accel_pp, 'pp'], [r.mom_accel_rel, 'pct'],
+        [r.yoy, 'pct'], [r.accel_pp, 'pp'], [r.accel_rel, 'pct'],
         [r.momentum, 'mom'], [r.cum, 'money'], [r.cum_yoy, 'pct'],
       ]),
       '兩欄加速度看的東西不一樣。年增加速度已排除季節性，是趨勢轉折，'
