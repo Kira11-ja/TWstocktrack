@@ -166,6 +166,7 @@ def main():
             "peg_min_growth": float(cfg.get("peg_min_growth", 0.05)),
             "min_analysts": int(cfg.get("min_analysts", 5)),
             "ntm_days": int(cfg.get("ntm_days", 365)),
+            "accel_rel_min_base": float(cfg.get("accel_rel_min_base", 0.02)),
         },
         "tickers": tickers,
         "quarters": quarters,
